@@ -1,7 +1,7 @@
 'use client';
 
 import { useParams, useRouter } from 'next/navigation';
-import { useEffect, useState, useRef, use } from 'react';
+import { useEffect, useState, useRef, use, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Monitor,
@@ -58,6 +58,23 @@ export default function RoomPage() {
   const [copied, setCopied] = useState(false);
   const [inputText, setInputText] = useState('');
   const [isTyping, setIsTyping] = useState(false);
+
+  // Focus Mode (Fullscreen) States & Refs
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [showToolbarFullscreen, setShowToolbarFullscreen] = useState(true);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const toolbarTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const isFullscreenRef = useRef(false);
+
+  // Cinema Chat States & Refs
+  const [soundMuted, setSoundMuted] = useState(false);
+  const [cinemaToasts, setCinemaToasts] = useState<{ id: string; senderName: string; content: string; isEmoji: boolean }[]>([]);
+  const [showCinemaComposer, setShowCinemaComposer] = useState(false);
+  const [cinemaInputText, setCinemaInputText] = useState('');
+
+  useEffect(() => {
+    isFullscreenRef.current = isFullscreen;
+  }, [isFullscreen]);
 
   // Chat Data
   const [messages, setMessages] = useState<Message[]>([]);
@@ -153,10 +170,7 @@ export default function RoomPage() {
 
     channel
       .on('broadcast', { event: 'chat-message' }, ({ payload }) => {
-        setMessages((prev) => {
-          if (prev.some((m) => m.id === payload.id)) return prev;
-          return [...prev, payload];
-        });
+        handleIncomingMessage(payload);
       })
       .subscribe((status, err) => {
         console.log(`[Chat Broadcast] Subscription Status: ${status}`, err || '');
@@ -183,12 +197,7 @@ export default function RoomPage() {
           filter: `room_id=eq.${roomId}`,
         },
         (payload) => {
-          const newMsg = payload.new as Message;
-          // Avoid duplicate updates from local inserts
-          setMessages((prev) => {
-            if (prev.some((m) => m.id === newMsg.id)) return prev;
-            return [...prev, newMsg];
-          });
+          handleIncomingMessage(payload.new as Message);
         }
       )
       .subscribe((status, err) => {
@@ -241,6 +250,9 @@ export default function RoomPage() {
     
     // Optimistic update
     setMessages((prev) => [...prev, localMsg]);
+    if (isFullscreen) {
+      addCinemaToast(localMsg);
+    }
 
     // Broadcast message in real-time
     if (chatChannelRef.current) {
@@ -342,6 +354,199 @@ export default function RoomPage() {
     return null;
   })();
 
+  // Synthesize a soft premium chime sound locally using Web Audio API
+  const playNotificationSound = () => {
+    if (typeof window === 'undefined') return;
+    try {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      const now = ctx.currentTime;
+      
+      const osc1 = ctx.createOscillator();
+      const osc2 = ctx.createOscillator();
+      const gain = ctx.createGain();
+      
+      osc1.type = 'sine';
+      osc1.frequency.setValueAtTime(587.33, now); // D5
+      osc1.frequency.exponentialRampToValueAtTime(880, now + 0.15); // A5
+      
+      osc2.type = 'sine';
+      osc2.frequency.setValueAtTime(880, now);
+      osc2.frequency.exponentialRampToValueAtTime(1174.66, now + 0.15); // D6
+      
+      gain.gain.setValueAtTime(0.08, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
+      
+      osc1.connect(gain);
+      osc2.connect(gain);
+      gain.connect(ctx.destination);
+      
+      osc1.start(now);
+      osc2.start(now);
+      
+      osc1.stop(now + 0.18);
+      osc2.stop(now + 0.18);
+    } catch (e) {
+      console.warn('Failed to play synthesized chime:', e);
+    }
+  };
+
+  // Check if string contains only emojis
+  const isEmojiOnly = (str: string) => {
+    const cleaned = str.replace(/\s/g, '');
+    if (!cleaned) return false;
+    const emojiRegex = /^(\u00a9|\u00ae|[\u2000-\u3300]|\ud83c[\ud000-\udfff]|\ud83d[\ud000-\udfff]|\ud83e[\ud000-\udfff])+$/;
+    return emojiRegex.test(cleaned);
+  };
+
+  // Add message to Cinema Toasts
+  const addCinemaToast = useCallback((msg: Message) => {
+    const isIncoming = msg.sender_id !== myId;
+    if (isIncoming && !soundMuted) {
+      playNotificationSound();
+    }
+
+    const id = msg.id || Math.random().toString();
+    const newToast = {
+      id,
+      senderName: msg.sender_name,
+      content: msg.content,
+      isEmoji: isEmojiOnly(msg.content),
+    };
+
+    setCinemaToasts((prev) => {
+      const current = [...prev, newToast];
+      if (current.length > 3) {
+        return current.slice(current.length - 3);
+      }
+      return current;
+    });
+
+    setTimeout(() => {
+      setCinemaToasts((prev) => prev.filter((t) => t.id !== id));
+    }, 4000);
+  }, [myId, soundMuted]);
+
+  // Handle incoming message routing (updates messages list and plays toast if fullscreen)
+  const handleIncomingMessage = useCallback((msg: Message) => {
+    setMessages((prev) => {
+      if (prev.some((m) => m.id === msg.id)) return prev;
+      if (isFullscreenRef.current) {
+        addCinemaToast(msg);
+      }
+      return [...prev, msg];
+    });
+  }, [addCinemaToast]);
+
+  const handleSendCinemaMessage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!cinemaInputText.trim()) return;
+
+    try {
+      const content = cinemaInputText;
+      setCinemaInputText('');
+      setShowCinemaComposer(false);
+
+      const localMsg: Message = {
+        id: crypto.randomUUID(),
+        room_id: roomId,
+        sender_id: myId,
+        sender_name: userName,
+        content,
+        created_at: new Date().toISOString(),
+      };
+
+      addCinemaToast(localMsg);
+      setMessages((prev) => [...prev, localMsg]);
+
+      if (chatChannelRef.current) {
+        chatChannelRef.current.send({
+          type: 'broadcast',
+          event: 'chat-message',
+          payload: localMsg,
+        });
+      }
+
+      await supabase.from('messages').insert({
+        room_id: roomId,
+        sender_id: myId,
+        sender_name: userName,
+        content,
+      });
+    } catch (err) {
+      console.warn('Cinema chat send error:', err);
+    }
+  };
+
+  // Focus Mode toggle function
+  const toggleFocusMode = () => {
+    if (!webrtc.isHost) return;
+
+    if (!document.fullscreenElement) {
+      rootRef.current?.requestFullscreen().catch(err => {
+        console.error('Error attempting to enable fullscreen:', err);
+      });
+    } else {
+      document.exitFullscreen().catch(err => {
+        console.error('Error attempting to exit fullscreen:', err);
+      });
+    }
+  };
+
+  // Fullscreen change listener
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      const active = document.fullscreenElement !== null;
+      setIsFullscreen(active);
+      if (!active) {
+        setShowToolbarFullscreen(true);
+      }
+    };
+
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+    };
+  }, []);
+
+  // Keyboard shortcut listener ('F' key to toggle fullscreen)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && showCinemaComposer) {
+        setShowCinemaComposer(false);
+        e.stopPropagation();
+        return;
+      }
+      if (document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA') {
+        return;
+      }
+      if (e.key === 'f' || e.key === 'F') {
+        toggleFocusMode();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [webrtc.isHost, isFullscreen, showCinemaComposer]);
+
+  // Mouse move activity tracker for fullscreen toolbar
+  const handleMouseMove = () => {
+    if (!isFullscreen) return;
+
+    setShowToolbarFullscreen(true);
+
+    if (toolbarTimerRef.current) {
+      clearTimeout(toolbarTimerRef.current);
+    }
+
+    toolbarTimerRef.current = setTimeout(() => {
+      setShowToolbarFullscreen(false);
+    }, 3000);
+  };
+
   // Main Render - Loading state
   if (isLoading) {
     return (
@@ -379,10 +584,15 @@ export default function RoomPage() {
   }
 
   return (
-    <div className="h-screen max-h-screen bg-shasha-bg flex flex-col overflow-hidden select-none">
+    <div
+      ref={rootRef}
+      onMouseMove={handleMouseMove}
+      className="h-screen max-h-screen bg-shasha-bg flex flex-col overflow-hidden select-none relative"
+    >
       
       {/* Top Navigation Bar */}
-      <header className="h-16 border-b border-white/[0.06] flex items-center justify-between px-6 bg-shasha-card/50 backdrop-blur-md z-10 shrink-0">
+      {!isFullscreen && (
+        <header className="h-16 border-b border-white/[0.06] flex items-center justify-between px-6 bg-shasha-card/50 backdrop-blur-md z-10 shrink-0">
         <div className="flex items-center gap-3">
           <div
             onClick={() => router.push('/')}
@@ -435,13 +645,14 @@ export default function RoomPage() {
           </button>
         </div>
       </header>
+      )}
 
       {/* Main Workspace Panels */}
       <div className="flex-1 flex overflow-hidden w-full relative">
         
         {/* Left Panel: Participants Sidebar */}
         <AnimatePresence>
-          {showParticipants && (
+          {showParticipants && !isFullscreen && (
             <motion.aside
               initial={{ width: 0, opacity: 0 }}
               animate={{ width: 240, opacity: 1 }}
@@ -585,7 +796,7 @@ export default function RoomPage() {
 
         {/* Right Panel: Chat Sidebar */}
         <AnimatePresence>
-          {showChat && (
+          {showChat && !isFullscreen && (
             <motion.aside
               initial={{ width: 0, opacity: 0 }}
               animate={{ width: 320, opacity: 1 }}
@@ -654,7 +865,18 @@ export default function RoomPage() {
       </div>
 
       {/* Bottom Control Toolbar */}
-      <footer className="h-20 border-t border-white/[0.06] bg-shasha-card/50 backdrop-blur-md flex items-center justify-between px-6 shrink-0 z-10">
+      <motion.footer
+        animate={{
+          y: isFullscreen && !showToolbarFullscreen ? 100 : 0,
+          opacity: isFullscreen && !showToolbarFullscreen ? 0 : 1,
+        }}
+        transition={{ duration: 0.3, ease: 'easeInOut' }}
+        className={`${
+          isFullscreen
+            ? 'absolute bottom-6 left-1/2 -translate-x-1/2 w-auto bg-zinc-950/85 border border-white/10 rounded-2xl shadow-2xl backdrop-blur-lg h-16 px-6 gap-8'
+            : 'h-20 border-t border-white/[0.06] bg-shasha-card/50 backdrop-blur-md w-full px-6'
+        } flex items-center justify-between shrink-0 z-50 transition-all duration-300`}
+      >
         
         {/* Left Side: Room Toggles */}
         <div className="flex items-center gap-2">
@@ -718,6 +940,21 @@ export default function RoomPage() {
               <Monitor className="w-5 h-5" />
             </button>
           )}
+
+          {/* Focus Mode / Fullscreen Button - Host Only */}
+          {webrtc.isHost && (
+            <button
+              onClick={toggleFocusMode}
+              title={isFullscreen ? 'إغلاق نمط التركيز' : 'نمط التركيز (ملء الشاشة)'}
+              className={`w-12 h-12 rounded-full flex items-center justify-center border transition-all scale-100 hover:scale-105 active:scale-95 cursor-pointer ${
+                isFullscreen
+                  ? 'bg-shasha-accent/15 border-shasha-accent/40 text-shasha-accent'
+                  : 'bg-white/5 border-white/5 text-white hover:bg-white/10'
+              }`}
+            >
+              {isFullscreen ? <Minimize className="w-5 h-5" /> : <Maximize className="w-5 h-5" />}
+            </button>
+          )}
         </div>
 
         {/* Right Side: Exit & Settings */}
@@ -741,7 +978,7 @@ export default function RoomPage() {
           </button>
         </div>
 
-      </footer>
+      </motion.footer>
 
       {/* Settings Dialog Modal */}
       <AnimatePresence>
@@ -817,6 +1054,22 @@ export default function RoomPage() {
                 </div>
               </div>
 
+              {/* Mute Chat Sounds Toggle */}
+              <div>
+                <label className="block text-xs font-semibold text-shasha-secondary mb-2">إشعارات سينما شات</label>
+                <button
+                  onClick={() => setSoundMuted(!soundMuted)}
+                  className={`w-full p-3 rounded-xl border text-xs font-semibold flex items-center justify-between transition-all cursor-pointer ${
+                    soundMuted
+                      ? 'bg-shasha-danger/10 border-shasha-danger/25 text-shasha-danger'
+                      : 'bg-shasha-success/10 border-shasha-success/25 text-shasha-success'
+                  }`}
+                >
+                  <span>{soundMuted ? 'أصوات الإشعارات معطلة' : 'أصوات الإشعارات مفعلة'}</span>
+                  <Volume2 className="w-4 h-4" />
+                </button>
+              </div>
+
               <button
                 onClick={() => setShowSettings(false)}
                 className="w-full mt-2 py-3 rounded-xl bg-shasha-accent text-white font-semibold text-sm hover:bg-shasha-accent-hover transition-colors cursor-pointer"
@@ -828,6 +1081,98 @@ export default function RoomPage() {
           </div>
         )}
       </AnimatePresence>
+
+      {/* Floating Chat Button for Cinema Mode */}
+      <AnimatePresence>
+        {isFullscreen && showToolbarFullscreen && !showCinemaComposer && (
+          <motion.button
+            initial={{ scale: 0.8, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            exit={{ scale: 0.8, opacity: 0 }}
+            transition={{ duration: 0.25 }}
+            onClick={() => setShowCinemaComposer(true)}
+            className="fixed bottom-24 right-6 w-12 h-12 rounded-full glass-panel bg-zinc-950/80 border border-white/15 text-white flex items-center justify-center shadow-2xl hover:scale-105 active:scale-95 cursor-pointer z-50 focus:outline-none"
+          >
+            <MessageSquare className="w-5 h-5 text-shasha-accent" />
+          </motion.button>
+        )}
+      </AnimatePresence>
+
+      {/* Cinema Composer */}
+      <AnimatePresence>
+        {isFullscreen && showCinemaComposer && (
+          <div className="fixed inset-0 bg-black/40 backdrop-blur-xs z-50 flex items-end sm:items-center justify-center p-4">
+            {/* Click outside to close */}
+            <div className="absolute inset-0" onClick={() => setShowCinemaComposer(false)} />
+            
+            <motion.form
+              initial={{ y: 50, opacity: 0, scale: 0.95 }}
+              animate={{ y: 0, opacity: 1, scale: 1 }}
+              exit={{ y: 50, opacity: 0, scale: 0.95 }}
+              transition={{ duration: 0.25, ease: 'easeOut' }}
+              onSubmit={handleSendCinemaMessage}
+              className="w-full max-w-md bg-zinc-950/90 border border-white/10 p-3 rounded-2xl shadow-2xl backdrop-blur-lg flex gap-2 relative z-10 mb-4 sm:mb-0"
+            >
+              <input
+                ref={(input) => { if (input) input.focus(); }}
+                type="text"
+                value={cinemaInputText}
+                onChange={(e) => setCinemaInputText(e.target.value)}
+                placeholder="اكتب رسالة سينما شات..."
+                className="flex-1 px-4 py-2 bg-white/5 border border-white/5 focus:border-shasha-accent/40 rounded-xl text-white text-sm text-right focus:outline-none placeholder-white/30"
+              />
+              <button
+                type="submit"
+                className="w-10 h-10 rounded-xl bg-shasha-accent text-white flex items-center justify-center hover:bg-shasha-accent-hover active:scale-95 transition-all cursor-pointer shrink-0"
+              >
+                <Send className="w-4 h-4" />
+              </button>
+            </motion.form>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Cinema Chat Toasts Container */}
+      <div className="fixed bottom-24 left-6 z-50 flex flex-col gap-2 max-w-[320px] pointer-events-none">
+        <AnimatePresence>
+          {isFullscreen && cinemaToasts.map((toast) => {
+            if (toast.isEmoji) {
+              return (
+                <motion.div
+                  key={toast.id}
+                  initial={{ opacity: 0, y: 20, scale: 0.5 }}
+                  animate={{ 
+                    opacity: 1, 
+                    y: 0, 
+                    scale: 1,
+                    rotate: [0, -10, 10, -10, 0],
+                  }}
+                  exit={{ opacity: 0, filter: 'blur(5px)' }}
+                  transition={{ duration: 0.35, ease: 'easeOut' }}
+                  className="flex flex-col items-start p-3 bg-zinc-950/45 border border-white/5 rounded-2xl backdrop-blur-md shadow-xl text-right"
+                >
+                  <span className="text-[10px] font-bold text-white/50 mb-0.5">{toast.senderName}</span>
+                  <span className="text-3xl animate-bounce leading-none py-1 block">{toast.content}</span>
+                </motion.div>
+              );
+            }
+            
+            return (
+              <motion.div
+                key={toast.id}
+                initial={{ opacity: 0, y: 20, scale: 0.95 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, filter: 'blur(5px)' }}
+                transition={{ duration: 0.3 }}
+                className="flex flex-col items-start p-3 bg-zinc-950/75 border border-white/10 rounded-2xl backdrop-blur-md shadow-xl text-right max-w-[300px]"
+              >
+                <span className="text-[10px] font-bold text-shasha-accent mb-0.5">{toast.senderName}</span>
+                <span className="text-xs text-white/90 font-medium leading-relaxed break-words w-full">{toast.content}</span>
+              </motion.div>
+            );
+          })}
+        </AnimatePresence>
+      </div>
 
     </div>
   );
