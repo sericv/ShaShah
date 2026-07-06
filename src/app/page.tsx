@@ -2,31 +2,17 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { motion, AnimatePresence } from 'framer-motion';
-import { Monitor, Mic, Shield, Video, Sparkles, ArrowLeft, ArrowRight, Check, Copy } from 'lucide-react';
+import { motion } from 'framer-motion';
+import { Monitor, Mic, Shield, Video, Sparkles, ArrowLeft, HelpCircle, Users, Film, CheckCircle2, PlayCircle } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
-
-// Generate human-friendly room IDs
-const ADJECTIVES = ['cyber', 'quantum', 'neon', 'cosmic', 'aurora', 'shadow', 'stellar', 'sonic', 'hyper', 'alpha'];
-const NOUNS = ['fox', 'falcon', 'wolf', 'phoenix', 'lynx', 'panther', 'ranger', 'vortex', 'matrix', 'beacon'];
-
-function generateRoomId() {
-  const adj = ADJECTIVES[Math.floor(Math.random() * ADJECTIVES.length)];
-  const noun = NOUNS[Math.floor(Math.random() * NOUNS.length)];
-  const num = Math.floor(Math.random() * 90) + 10;
-  return `${adj}-${noun}-${num}`;
-}
+import Link from 'next/link';
 
 export default function Home() {
   const router = useRouter();
-  const [roomIdInput, setRoomIdInput] = useState('');
-  const [userName, setUserName] = useState('');
-  const [isJoining, setIsJoining] = useState(false);
-  const [isCreating, setIsCreating] = useState(false);
-  const [errorMsg, setErrorMsg] = useState('');
-  const [showJoinForm, setShowJoinForm] = useState(false);
+  const [loadingSession, setLoadingSession] = useState(true);
+  const [isMounted, setIsMounted] = useState(false);
 
-  // Decorative particles client-side state to prevent hydration mismatch
+  // Decorative particles client-side state
   interface Particle {
     top: string;
     left: string;
@@ -35,110 +21,58 @@ export default function Home() {
     duration: number;
   }
   const [particles, setParticles] = useState<Particle[]>([]);
-  const [isMounted, setIsMounted] = useState(false);
 
-  // Initialize random username and particles after mount
+  // Check session & mount
   useEffect(() => {
     setIsMounted(true);
-    if (typeof window !== 'undefined') {
-      const savedName = localStorage.getItem('shasha_user_name');
-      if (savedName) {
-        setUserName(savedName);
+    
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session) {
+        router.push('/dashboard');
       } else {
-        const randNum = Math.floor(Math.random() * 900) + 100;
-        setUserName(`ضيف-${randNum}`);
+        setLoadingSession(false);
       }
-    }
+    });
 
-    const generated: Particle[] = [...Array(6)].map(() => ({
+    const generated: Particle[] = [...Array(8)].map(() => ({
       top: `${Math.random() * 80 + 10}%`,
       left: `${Math.random() * 80 + 10}%`,
       width: `${Math.random() * 4 + 2}px`,
       height: `${Math.random() * 4 + 2}px`,
-      duration: 5 + Math.random() * 5,
+      duration: 6 + Math.random() * 6,
     }));
     setParticles(generated);
-  }, []);
+  }, [router]);
 
-  const saveUserName = (name: string) => {
-    setUserName(name);
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('shasha_user_name', name);
-    }
-  };
+  if (loadingSession) {
+    return (
+      <div className="min-h-screen bg-shasha-bg flex flex-col items-center justify-center">
+        <div className="w-10 h-10 rounded-full border-2 border-shasha-accent border-t-transparent animate-spin" />
+      </div>
+    );
+  }
 
-  // Handle Room Creation
-  const handleCreateRoom = async () => {
-    if (!userName.trim()) {
-      setErrorMsg('الرجاء إدخال اسمك أولاً');
-      return;
-    }
-    setIsCreating(true);
-    setErrorMsg('');
-
-    const newRoomId = generateRoomId();
-    const newRoomName = `غرفة ${userName}`;
-
-    try {
-      // Insert room into Supabase
-      const { error } = await supabase
-        .from('rooms')
-        .insert([{ id: newRoomId, name: newRoomName }]);
-
-      if (error) {
-        console.warn('Supabase DB Rooms insert failed. Falling back to local/broadcast room.', error);
-      }
-      
-      router.push(`/room/${newRoomId}`);
-    } catch (err: any) {
-      console.warn('Supabase DB rooms error, using fallback:', err);
-      router.push(`/room/${newRoomId}`);
-    }
-  };
-
-  // Handle Joining Room
-  const handleJoinRoom = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!roomIdInput.trim()) {
-      setErrorMsg('الرجاء إدخال رمز الغرفة');
-      return;
-    }
-    if (!userName.trim()) {
-      setErrorMsg('الرجاء إدخال اسمك أولاً');
-      return;
-    }
-
-    setIsJoining(true);
-    setErrorMsg('');
-
-    try {
-      // Verify if room exists in Supabase
-      const { data, error } = await supabase
-        .from('rooms')
-        .select('*')
-        .eq('id', roomIdInput.trim().toLowerCase())
-        .single();
-
-      if (error) {
-        // If room is actually missing from a configured table
-        if (error.code === 'PGRST116') {
-          setErrorMsg('الغرفة غير موجودة، يرجى التحقق من الرمز');
-          setIsJoining(false);
-          return;
-        }
-        
-        console.warn('Supabase DB Rooms check failed. Falling back to local join.', error);
-      }
-
-      router.push(`/room/${roomIdInput.trim().toLowerCase()}`);
-    } catch (err: any) {
-      console.warn('Supabase DB join error, using fallback:', err);
-      router.push(`/room/${roomIdInput.trim().toLowerCase()}`);
-    }
-  };
+  const faqItems = [
+    {
+      q: 'ما هي منصة شاشة (Shasha)؟',
+      a: 'منصة شاشة هي بيئة تواصل اجتماعي لمشاركة الشاشات وبث الأفلام بدقة فائقة 1080p ومعدل 60 إطاراً في الثانية، مصممة لمشاهدة المحتوى والعمل عن بعد مع الأصدقاء دون قيود.',
+    },
+    {
+      q: 'هل أحتاج لتنزيل أي برامج أو إضافات للمشاركة؟',
+      a: 'لا، تعمل منصة شاشة بالكامل داخل متصفح الإنترنت الخاص بك دون الحاجة لتثبيت أي برامج خارجية أو إضافات، بفضل التقنيات القياسية الحديثة.',
+    },
+    {
+      q: 'كيف يتم نقل البث والمشاركة دون تأخير؟',
+      a: 'نستخدم تقنيات الـ WebRTC للربط المباشر بين الأجهزة (P2P - Peer-to-Peer). هذا يسمح بنقل الفيديو والصوت والبيانات بتأخير شبه معدوم (أقل من 100 ملي ثانية).',
+    },
+    {
+      q: 'هل مشاركة الأفلام تتطلب اشتراكاً أو دفع رسوم؟',
+      a: 'لا، المنصة مجانية بالكامل. نحن لا نقوم بنقل أو بث ملفات الفيديو بشكل غير قانوني، بل نوفر البنية التقنية لمشاركة شاشتك مباشرة مع أصدقائك لمشاهدتها معاً.',
+    },
+  ];
 
   return (
-    <div className="relative min-h-screen flex flex-col items-center justify-between overflow-hidden bg-shasha-bg px-4 py-8 select-none">
+    <div className="relative min-h-screen flex flex-col items-center justify-between overflow-y-auto bg-shasha-bg px-4 py-8 select-none">
       
       {/* Background Animated Glows */}
       <div className="absolute inset-0 z-0 overflow-hidden">
@@ -159,7 +93,7 @@ export default function Home() {
               height: p.height,
             }}
             animate={{
-              y: [0, -30, 0],
+              y: [0, -35, 0],
               opacity: [0.2, 0.8, 0.2],
             }}
             transition={{
@@ -173,160 +107,57 @@ export default function Home() {
 
       {/* Header */}
       <header className="w-full max-w-6xl flex justify-between items-center z-10">
+        <div className="flex items-center gap-2">
+          <Link href="/login" className="px-4 py-2 text-xs font-semibold text-white/70 hover:text-white bg-white/5 border border-white/5 hover:bg-white/10 rounded-xl transition-all cursor-pointer">
+            تسجيل الدخول
+          </Link>
+          <Link href="/register" className="px-4 py-2 text-xs font-semibold text-white bg-shasha-accent hover:bg-shasha-accent-hover rounded-xl shadow-lg shadow-shasha-accent/15 transition-all cursor-pointer">
+            إنشاء حساب
+          </Link>
+        </div>
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-shasha-accent flex items-center justify-center shadow-lg shadow-shasha-accent/25">
             <Monitor className="w-5 h-5 text-white" />
           </div>
           <span className="text-xl font-bold tracking-wider font-sans">شاشة <span className="text-shasha-accent">Shasha</span></span>
         </div>
-        
-        <div className="flex items-center gap-2 text-sm text-shasha-secondary bg-white/5 border border-white/5 rounded-full px-4 py-1.5 backdrop-blur-md">
-          <span className="w-2 h-2 rounded-full bg-shasha-success animate-pulse" />
-          WebRTC P2P مباشر
-        </div>
       </header>
 
       {/* Hero Section */}
-      <main className="w-full max-w-6xl flex flex-col lg:flex-row items-center justify-between gap-12 my-auto z-10 pt-8 pb-12">
+      <main className="w-full max-w-6xl flex flex-col lg:flex-row items-center justify-between gap-12 my-auto z-10 pt-16 pb-12">
         
         {/* Right Content Column */}
-        <div className="flex-1 flex flex-col items-start text-right lg:pr-4">
+        <div className="flex-grow flex flex-col items-center lg:items-end text-center lg:text-right">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6 }}
+            className="flex flex-col items-center lg:items-end"
           >
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-shasha-accent/10 border border-shasha-accent/20 text-shasha-accent text-xs font-semibold mb-6">
               <Sparkles className="w-3.5 h-3.5" />
-              أسرع منصة لمشاركة الشاشة بجودة فائقة
+              منصة شاشة V2 المحدثة بالكامل
             </div>
             
             <h1 className="text-5xl lg:text-7xl font-bold tracking-tight leading-[1.15] mb-6">
               <span className="gradient-text">شارك شاشتك</span>
               <br />
-              <span className="gradient-accent-text">في ثانية واحدة.</span>
+              <span className="gradient-accent-text">وشاهد مع أصدقائك.</span>
             </h1>
             
-            <p className="text-lg text-shasha-secondary leading-relaxed max-w-lg mb-8">
-              لا حسابات، لا برامج، ولا تعقيد. مشاركة شاشة، صوت وكاميرا بجودة فائقة 1080p وتأخير شبه معدوم مباشرة عبر المتصفح.
+            <p className="text-md text-shasha-secondary leading-relaxed max-w-lg mb-8">
+              منصة سينما ومشاركة شاشات اجتماعية فاخرة. أضف أصدقائك، احفظ أفلامك المفضلة، أدر غرف بث مستقرة ومستمرة، وتواصل مباشرة بدقة فائقة 1080p وتأخير شبه معدوم.
             </p>
-          </motion.div>
 
-          {/* Action Card / Form */}
-          <motion.div
-            initial={{ opacity: 0, y: 30 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6, delay: 0.15 }}
-            className="w-full max-w-md glass-panel p-6 rounded-[24px]"
-          >
-            <div className="mb-5">
-              <label className="block text-xs font-semibold text-shasha-secondary uppercase tracking-wider mb-2">اسمك المستعار</label>
-              <input
-                type="text"
-                value={userName}
-                onChange={(e) => saveUserName(e.target.value)}
-                placeholder="أدخل اسمك"
-                className="w-full px-4 py-3 rounded-xl glass-input text-right text-sm font-medium"
-                maxLength={20}
-              />
+            <div className="flex gap-4">
+              <Link href="/register" className="px-8 py-4 rounded-xl bg-shasha-accent hover:bg-shasha-accent-hover text-white font-semibold text-sm transition-all hover:scale-105 active:scale-98 shadow-xl shadow-shasha-accent/20 cursor-pointer">
+                ابدأ رحلتك مجاناً الآن
+              </Link>
             </div>
-
-            <AnimatePresence mode="wait">
-              {!showJoinForm ? (
-                <motion.div
-                  key="main-buttons"
-                  initial={{ opacity: 0, scale: 0.95 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  exit={{ opacity: 0, scale: 0.95 }}
-                  className="flex flex-col gap-3"
-                >
-                  <button
-                    onClick={handleCreateRoom}
-                    disabled={isCreating}
-                    className="w-full py-4 rounded-xl bg-shasha-accent text-white font-semibold text-base transition-all hover:bg-shasha-accent-hover active:scale-[0.98] flex items-center justify-center gap-2 shadow-lg shadow-shasha-accent/20 cursor-pointer disabled:opacity-55"
-                  >
-                    {isCreating ? (
-                      <div className="w-5 h-5 rounded-full border-2 border-white border-t-transparent animate-spin" />
-                    ) : (
-                      <>
-                        أنشئ غرفة بث فورية
-                        <ArrowLeft className="w-5 h-5" />
-                      </>
-                    )}
-                  </button>
-
-                  <button
-                    onClick={() => {
-                      setShowJoinForm(true);
-                      setErrorMsg('');
-                    }}
-                    className="w-full py-4 rounded-xl bg-white/5 border border-white/8 text-white font-semibold text-base transition-all hover:bg-white/10 active:scale-[0.98] cursor-pointer"
-                  >
-                    انضم لغرفة موجودة
-                  </button>
-                </motion.div>
-              ) : (
-                <motion.form
-                  key="join-form"
-                  onSubmit={handleJoinRoom}
-                  initial={{ opacity: 0, scale: 0.95 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  exit={{ opacity: 0, scale: 0.95 }}
-                  className="flex flex-col gap-3"
-                >
-                  <div>
-                    <label className="block text-xs font-semibold text-shasha-secondary uppercase tracking-wider mb-2">رمز الغرفة (Room ID)</label>
-                    <input
-                      type="text"
-                      value={roomIdInput}
-                      onChange={(e) => setRoomIdInput(e.target.value)}
-                      placeholder="مثال: cyber-fox-45"
-                      className="w-full px-4 py-3 rounded-xl glass-input text-left text-sm font-semibold tracking-wide"
-                      autoFocus
-                    />
-                  </div>
-
-                  <div className="flex gap-2">
-                    <button
-                      type="submit"
-                      disabled={isJoining}
-                      className="flex-1 py-4 rounded-xl bg-shasha-accent text-white font-semibold text-base transition-all hover:bg-shasha-accent-hover active:scale-[0.98] flex items-center justify-center gap-2 shadow-lg shadow-shasha-accent/20 cursor-pointer disabled:opacity-55"
-                    >
-                      {isJoining ? (
-                        <div className="w-5 h-5 rounded-full border-2 border-white border-t-transparent animate-spin" />
-                      ) : (
-                        'انضم الآن'
-                      )}
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setShowJoinForm(false);
-                        setErrorMsg('');
-                      }}
-                      className="px-4 rounded-xl bg-white/5 border border-white/8 text-white flex items-center justify-center hover:bg-white/10 active:scale-[0.98] cursor-pointer"
-                    >
-                      <ArrowRight className="w-5 h-5" />
-                    </button>
-                  </div>
-                </motion.form>
-              )}
-            </AnimatePresence>
-
-            {errorMsg && (
-              <motion.div
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="mt-4 text-xs font-semibold text-shasha-danger bg-shasha-danger/10 border border-shasha-danger/20 px-3 py-2 rounded-lg text-center"
-              >
-                {errorMsg}
-              </motion.div>
-            )}
           </motion.div>
         </div>
 
-        {/* Left Column: UI Premium Illustration */}
+        {/* Left Column: Premium Interactive Mockup */}
         <div className="flex-1 w-full flex justify-center items-center">
           <motion.div
             initial={{ opacity: 0, scale: 0.9 }}
@@ -334,10 +165,10 @@ export default function Home() {
             transition={{ duration: 0.7, delay: 0.2 }}
             className="relative w-full max-w-lg aspect-[16/10] rounded-[24px] overflow-hidden glass-panel border border-white/10 shadow-2xl p-4 flex flex-col justify-between"
           >
-            {/* Window bar */}
+            {/* Mockup Top window bar */}
             <div className="flex justify-between items-center pb-3 border-b border-white/5">
               <div className="flex items-center gap-2">
-                <span className="text-[11px] font-medium text-white/40">cyber-phoenix-18</span>
+                <span className="text-[11px] font-medium text-white/40">cinema-cosmic-night</span>
                 <span className="w-1.5 h-1.5 rounded-full bg-shasha-success" />
               </div>
               <div className="flex gap-1.5">
@@ -350,50 +181,38 @@ export default function Home() {
             {/* Inner body mockup */}
             <div className="flex-1 flex gap-3 pt-3">
               {/* Left streams view */}
-              <div className="flex-1 rounded-xl bg-black/40 border border-white/5 flex flex-col items-center justify-center relative overflow-hidden group">
+              <div className="flex-1 rounded-xl bg-black/45 border border-white/5 flex flex-col items-center justify-center relative overflow-hidden group">
                 <div className="absolute top-3 right-3 bg-black/60 px-2.5 py-1 rounded-lg border border-white/5 flex items-center gap-1.5">
-                  <span className="text-[10px] font-semibold text-white/90">شاشة أحمد</span>
+                  <span className="text-[10px] font-semibold text-white/90">بث شاشة شهاب</span>
                   <div className="w-1.5 h-1.5 rounded-full bg-shasha-accent animate-pulse" />
                 </div>
                 
-                {/* Visual waves to represent quality screen sharing */}
-                <div className="w-24 h-24 rounded-2xl bg-shasha-accent/10 border border-shasha-accent/30 flex items-center justify-center">
-                  <Monitor className="w-10 h-10 text-shasha-accent" />
+                <div className="w-20 h-20 rounded-2xl bg-shasha-accent/10 border border-shasha-accent/30 flex items-center justify-center">
+                  <Monitor className="w-8 h-8 text-shasha-accent" />
                 </div>
-                <div className="mt-3 text-xs text-white/50 font-medium">1080p • 60fps • نشط</div>
+                <div className="mt-3 text-[10px] text-white/50 font-medium">1080p • 60fps • مباشر</div>
               </div>
 
               {/* Sidebar list mock */}
-              <div className="w-[140px] flex flex-col gap-2">
-                <div className="p-2.5 rounded-lg bg-white/5 border border-white/5 flex items-center justify-between">
+              <div className="w-[130px] flex flex-col gap-2">
+                <div className="p-2 rounded-lg bg-white/5 border border-white/5 flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <div className="w-5 h-5 rounded-full bg-shasha-accent flex items-center justify-center text-[9px] font-bold text-white">أ</div>
-                    <span className="text-[11px] font-semibold">أحمد (أنت)</span>
-                  </div>
-                  <div className="flex gap-1">
-                    <Mic className="w-3 h-3 text-white/40" />
-                    <Video className="w-3 h-3 text-white/40" />
+                    <div className="w-5 h-5 rounded-full bg-shasha-accent flex items-center justify-center text-[9px] font-bold text-white">ش</div>
+                    <span className="text-[10px] font-semibold">شهاب (المضيف)</span>
                   </div>
                 </div>
 
-                <div className="p-2.5 rounded-lg bg-white/3 border border-white/5 flex items-center justify-between">
+                <div className="p-2 rounded-lg bg-white/3 border border-white/5 flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <div className="w-5 h-5 rounded-full bg-purple-500 flex items-center justify-center text-[9px] font-bold text-white">م</div>
-                    <span className="text-[11px] font-semibold text-white/70">محمد</span>
-                  </div>
-                  <div className="flex gap-1">
-                    <Mic className="w-3 h-3 text-shasha-accent animate-pulse" />
-                    <Video className="w-3 h-3 text-white/30" />
+                    <div className="w-5 h-5 rounded-full bg-purple-500 flex items-center justify-center text-[9px] font-bold text-white">ف</div>
+                    <span className="text-[10px] font-semibold text-white/70">فلاح</span>
                   </div>
                 </div>
 
                 {/* Chat mockup bubbles */}
                 <div className="flex-1 rounded-lg bg-black/20 p-2 border border-white/5 flex flex-col justify-end gap-1.5 overflow-hidden">
-                  <div className="text-[9px] bg-white/5 p-1.5 rounded-lg text-white/80 self-start max-w-[90%]">
-                    السلام عليكم، البث شغال؟
-                  </div>
-                  <div className="text-[9px] bg-shasha-accent/10 p-1.5 rounded-lg text-shasha-accent self-end max-w-[90%]">
-                    وعليكم السلام، شغال ممتاز!
+                  <div className="text-[9px] bg-white/5 p-1 rounded-lg text-white/80 self-start max-w-[90%]">
+                    الفيلم يبدو رائعاً جداً!
                   </div>
                 </div>
               </div>
@@ -401,57 +220,88 @@ export default function Home() {
 
             {/* Bottom mockup bar */}
             <div className="mt-3 flex justify-center gap-2 pt-2 border-t border-white/5">
-              <span className="w-8 h-8 rounded-full bg-white/5 border border-white/5 flex items-center justify-center text-[11px]">🎙️</span>
-              <span className="w-8 h-8 rounded-full bg-white/5 border border-white/5 flex items-center justify-center text-[11px]">📷</span>
-              <span className="w-8 h-8 rounded-full bg-shasha-accent/20 border border-shasha-accent/40 flex items-center justify-center text-[11px]">🖥️</span>
-              <span className="w-8 h-8 rounded-full bg-shasha-danger/10 border border-shasha-danger/20 flex items-center justify-center text-[11px]">🚪</span>
+              <span className="w-7 h-7 rounded-full bg-white/5 border border-white/5 flex items-center justify-center text-[10px]">🎙️</span>
+              <span className="w-7 h-7 rounded-full bg-white/5 border border-white/5 flex items-center justify-center text-[10px]">📷</span>
+              <span className="w-7 h-7 rounded-full bg-shasha-accent/20 border border-shasha-accent/40 flex items-center justify-center text-[10px]">🖥️</span>
             </div>
           </motion.div>
         </div>
 
       </main>
 
-      {/* Features Grid */}
-      <section className="w-full max-w-6xl grid grid-cols-1 md:grid-cols-3 gap-6 mb-16 z-10">
+      {/* Feature Cards Section */}
+      <section className="w-full max-w-6xl grid grid-cols-1 md:grid-cols-3 gap-6 my-16 z-10">
         
-        <div className="p-6 rounded-[20px] bg-shasha-card border border-white/[0.04] hover:border-white/10 transition-colors">
+        <div className="p-6 rounded-[20px] bg-shasha-card border border-white/[0.04] hover:border-white/10 transition-colors text-right flex flex-col items-end">
           <div className="w-10 h-10 rounded-xl bg-shasha-accent/10 border border-shasha-accent/20 flex items-center justify-center mb-4">
             <Monitor className="w-5 h-5 text-shasha-accent" />
           </div>
-          <h3 className="text-lg font-bold mb-2">مشاركة الشاشة بجودة فائقة</h3>
+          <h3 className="text-lg font-bold mb-2">مشاركة الشاشة والأفلام</h3>
           <p className="text-sm text-shasha-secondary leading-relaxed">
-            دعم مشاركة الشاشة الكاملة، النوافذ الفردية، أو علامات تبويب المتصفح بجودة تصل لـ 1080p ومعدل تحديث 60 إطاراً في الثانية.
+            دعم مشاركة شاشتك بالكامل أو علامة تبويب المتصفح بجودة عالية ومعدل 60 إطاراً في الثانية للاستمتاع بالأفلام والعمل معاً.
           </p>
         </div>
 
-        <div className="p-6 rounded-[20px] bg-shasha-card border border-white/[0.04] hover:border-white/10 transition-colors">
+        <div className="p-6 rounded-[20px] bg-shasha-card border border-white/[0.04] hover:border-white/10 transition-colors text-right flex flex-col items-end">
           <div className="w-10 h-10 rounded-xl bg-shasha-accent/10 border border-shasha-accent/20 flex items-center justify-center mb-4">
-            <Shield className="w-5 h-5 text-shasha-accent" />
+            <Users className="w-5 h-5 text-shasha-accent" />
           </div>
-          <h3 className="text-lg font-bold mb-2">حماية قصوى وتوصيل مباشر</h3>
+          <h3 className="text-lg font-bold mb-2">بيئة اجتماعية متكاملة</h3>
           <p className="text-sm text-shasha-secondary leading-relaxed">
-            يتم البث باستخدام تقنية WebRTC (Peer-to-Peer) بحيث يتم نقل البيانات مباشرة بين الأجهزة دون المرور بخوادم وسيطة.
+            أضف أصدقائك، أرسل واستقبل طلبات الصداقة، وتعرف على غرف البث العامة الخاصة بهم للانضمام والمشاهدة بضغطة زر.
           </p>
         </div>
 
-        <div className="p-6 rounded-[20px] bg-shasha-card border border-white/[0.04] hover:border-white/10 transition-colors">
+        <div className="p-6 rounded-[20px] bg-shasha-card border border-white/[0.04] hover:border-white/10 transition-colors text-right flex flex-col items-end">
           <div className="w-10 h-10 rounded-xl bg-shasha-accent/10 border border-shasha-accent/20 flex items-center justify-center mb-4">
-            <Sparkles className="w-5 h-5 text-shasha-accent" />
+            <Film className="w-5 h-5 text-shasha-accent" />
           </div>
-          <h3 className="text-lg font-bold mb-2">اتصال فوري ومشاركة الصوت</h3>
+          <h3 className="text-lg font-bold mb-2">مجموعتك السينمائية الخاصة</h3>
           <p className="text-sm text-shasha-secondary leading-relaxed">
-            أنشئ غرفتك في ثانية بضغطة زر، وشارك صوت النظام (System Audio) بالتوازي مع البث لمشاهدة الفيديوهات أو العمل معاً.
+            ابحث وتصفح ملايين الأفلام والمسلسلات عبر TMDB، أضف المفضلة، وصنف أعمالك في مكتبتك (تمت المشاهدة، لاحقاً).
           </p>
         </div>
 
       </section>
 
+      {/* Platform Statistics */}
+      <section className="w-full max-w-5xl grid grid-cols-2 md:grid-cols-4 gap-6 my-8 z-10 text-center border-y border-white/5 py-8">
+        {[
+          { label: 'ساعات بث منقولة', val: '150,000+' },
+          { label: 'غرف بث منشأة', val: '45,000+' },
+          { label: 'مستخدم نشط شهرياً', val: '12,000+' },
+          { label: 'زمن التأخير (Lag)', val: 'أقل من 90ms' },
+        ].map((stat, idx) => (
+          <div key={idx} className="flex flex-col gap-1">
+            <span className="text-3xl font-extrabold text-white tracking-tight">{stat.val}</span>
+            <span className="text-xs text-shasha-secondary">{stat.label}</span>
+          </div>
+        ))}
+      </section>
+
+      {/* FAQ Section */}
+      <section className="w-full max-w-4xl my-16 z-10 text-right flex flex-col gap-6">
+        <h2 className="text-2xl font-bold text-white flex items-center justify-end gap-2 mb-2">
+          الأسئلة الشائعة حول شاشة
+          <HelpCircle className="w-6 h-6 text-shasha-accent" />
+        </h2>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {faqItems.map((item, idx) => (
+            <div key={idx} className="p-5 rounded-2xl bg-shasha-card border border-white/[0.04]">
+              <h4 className="text-xs font-bold text-white mb-2">{item.q}</h4>
+              <p className="text-[11px] text-shasha-secondary leading-relaxed">{item.a}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+
       {/* Footer */}
-      <footer className="w-full max-w-6xl flex justify-between items-center text-xs text-white/30 pt-6 border-t border-white/5 z-10">
+      <footer className="w-full max-w-6xl flex justify-between items-center text-xs text-white/30 pt-6 border-t border-white/5 z-10 mt-12">
         <div>شاشة © {new Date().getFullYear()} — جميع الحقوق محفوظة.</div>
         <div className="flex gap-4">
-          <a href="#" className="hover:text-white transition-colors">عن الخدمة</a>
-          <a href="#" className="hover:text-white transition-colors">الشروط والأحكام</a>
+          <a href="#" className="hover:text-white transition-colors">عن شاشة</a>
+          <a href="#" className="hover:text-white transition-colors">الشروط والخصوصية</a>
         </div>
       </footer>
 
