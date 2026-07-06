@@ -481,8 +481,6 @@ export default function RoomPage() {
 
   // Focus Mode toggle function
   const toggleFocusMode = () => {
-    if (!webrtc.isHost) return;
-
     if (!document.fullscreenElement) {
       rootRef.current?.requestFullscreen().catch(err => {
         console.error('Error attempting to enable fullscreen:', err);
@@ -530,7 +528,7 @@ export default function RoomPage() {
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [webrtc.isHost, isFullscreen, showCinemaComposer]);
+  }, [isFullscreen, showCinemaComposer]);
 
   // Mouse move activity tracker for fullscreen toolbar
   const handleMouseMove = () => {
@@ -587,6 +585,8 @@ export default function RoomPage() {
     <div
       ref={rootRef}
       onMouseMove={handleMouseMove}
+      onTouchStart={handleMouseMove}
+      onClick={handleMouseMove}
       className="h-screen max-h-screen bg-shasha-bg flex flex-col overflow-hidden select-none relative"
     >
       
@@ -941,20 +941,18 @@ export default function RoomPage() {
             </button>
           )}
 
-          {/* Focus Mode / Fullscreen Button - Host Only */}
-          {webrtc.isHost && (
-            <button
-              onClick={toggleFocusMode}
-              title={isFullscreen ? 'إغلاق نمط التركيز' : 'نمط التركيز (ملء الشاشة)'}
-              className={`w-12 h-12 rounded-full flex items-center justify-center border transition-all scale-100 hover:scale-105 active:scale-95 cursor-pointer ${
-                isFullscreen
-                  ? 'bg-shasha-accent/15 border-shasha-accent/40 text-shasha-accent'
-                  : 'bg-white/5 border-white/5 text-white hover:bg-white/10'
-              }`}
-            >
-              {isFullscreen ? <Minimize className="w-5 h-5" /> : <Maximize className="w-5 h-5" />}
-            </button>
-          )}
+          {/* Focus Mode / Fullscreen Button - Everyone */}
+          <button
+            onClick={toggleFocusMode}
+            title={isFullscreen ? 'إغلاق نمط التركيز' : 'نمط التركيز (ملء الشاشة)'}
+            className={`w-12 h-12 rounded-full flex items-center justify-center border transition-all scale-100 hover:scale-105 active:scale-95 cursor-pointer ${
+              isFullscreen
+                ? 'bg-shasha-accent/15 border-shasha-accent/40 text-shasha-accent'
+                : 'bg-white/5 border-white/5 text-white hover:bg-white/10'
+            }`}
+          >
+            {isFullscreen ? <Minimize className="w-5 h-5" /> : <Maximize className="w-5 h-5" />}
+          </button>
         </div>
 
         {/* Right Side: Exit & Settings */}
