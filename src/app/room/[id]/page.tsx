@@ -61,6 +61,7 @@ export default function RoomPage() {
 
   // Focus Mode (Fullscreen) States & Refs
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isImmersive, setIsImmersive] = useState(false); // CSS fallback for devices without Fullscreen API
   const [showToolbarFullscreen, setShowToolbarFullscreen] = useState(true);
   const rootRef = useRef<HTMLDivElement>(null);
   const toolbarTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -73,8 +74,8 @@ export default function RoomPage() {
   const [cinemaInputText, setCinemaInputText] = useState('');
 
   useEffect(() => {
-    isFullscreenRef.current = isFullscreen;
-  }, [isFullscreen]);
+    isFullscreenRef.current = isFullscreen || isImmersive;
+  }, [isFullscreen, isImmersive]);
 
   // Chat Data
   const [messages, setMessages] = useState<Message[]>([]);
@@ -250,7 +251,7 @@ export default function RoomPage() {
     
     // Optimistic update
     setMessages((prev) => [...prev, localMsg]);
-    if (isFullscreen) {
+    if (effectiveFullscreen) {
       addCinemaToast(localMsg);
     }
 
@@ -479,23 +480,67 @@ export default function RoomPage() {
     }
   };
 
-  // Focus Mode toggle function
+  // Cross-browser fullscreen helpers
+  const getFullscreenElement = (): Element | null => {
+    return document.fullscreenElement
+      || (document as any).webkitFullscreenElement
+      || null;
+  };
+
+  const requestFS = (el: HTMLElement): Promise<void> | null => {
+    if (el.requestFullscreen) return el.requestFullscreen();
+    if ((el as any).webkitRequestFullscreen) { (el as any).webkitRequestFullscreen(); return Promise.resolve(); }
+    return null; // API not available
+  };
+
+  const exitFS = (): Promise<void> | null => {
+    if (document.exitFullscreen) return document.exitFullscreen();
+    if ((document as any).webkitExitFullscreen) { (document as any).webkitExitFullscreen(); return Promise.resolve(); }
+    return null;
+  };
+
+  // Focus Mode toggle function – called directly from user gesture (click/tap)
   const toggleFocusMode = () => {
-    if (!document.fullscreenElement) {
-      rootRef.current?.requestFullscreen().catch(err => {
-        console.error('Error attempting to enable fullscreen:', err);
-      });
-    } else {
-      document.exitFullscreen().catch(err => {
-        console.error('Error attempting to exit fullscreen:', err);
-      });
+    const currentlyFS = getFullscreenElement() !== null;
+    const currentlyImmersive = isImmersive;
+
+    if (currentlyFS) {
+      // Exit native fullscreen
+      const result = exitFS();
+      if (!result) {
+        setIsFullscreen(false);
+      }
+      return;
+    }
+
+    if (currentlyImmersive) {
+      // Exit CSS immersive fallback
+      setIsImmersive(false);
+      setShowToolbarFullscreen(true);
+      return;
+    }
+
+    // Try native fullscreen first
+    if (rootRef.current) {
+      const result = requestFS(rootRef.current);
+      if (result === null) {
+        // Fullscreen API unavailable → use CSS immersive fallback
+        console.log('[Fullscreen] API unavailable, using immersive CSS fallback');
+        setIsImmersive(true);
+      } else {
+        result.catch(() => {
+          // requestFullscreen was rejected (e.g. not from user gesture, or blocked)
+          console.log('[Fullscreen] API rejected, using immersive CSS fallback');
+          setIsImmersive(true);
+        });
+      }
     }
   };
 
-  // Fullscreen change listener
+  // Fullscreen change listener (cross-browser)
   useEffect(() => {
     const handleFullscreenChange = () => {
-      const active = document.fullscreenElement !== null;
+      const active = getFullscreenElement() !== null;
       setIsFullscreen(active);
       if (!active) {
         setShowToolbarFullscreen(true);
@@ -503,10 +548,28 @@ export default function RoomPage() {
     };
 
     document.addEventListener('fullscreenchange', handleFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
     return () => {
       document.removeEventListener('fullscreenchange', handleFullscreenChange);
+      document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
     };
   }, []);
+
+  // ESC key exits immersive fallback mode
+  useEffect(() => {
+    if (!isImmersive) return;
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setIsImmersive(false);
+        setShowToolbarFullscreen(true);
+      }
+    };
+    window.addEventListener('keydown', handleEsc);
+    return () => window.removeEventListener('keydown', handleEsc);
+  }, [isImmersive]);
+
+  // Derive effective fullscreen state (native OR CSS fallback)
+  const effectiveFullscreen = isFullscreen || isImmersive;
 
   // Keyboard shortcut listener ('F' key to toggle fullscreen)
   useEffect(() => {
@@ -528,11 +591,11 @@ export default function RoomPage() {
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [isFullscreen, showCinemaComposer]);
+  }, [effectiveFullscreen, showCinemaComposer]);
 
   // Mouse move activity tracker for fullscreen toolbar
   const handleMouseMove = () => {
-    if (!isFullscreen) return;
+    if (!effectiveFullscreen) return;
 
     setShowToolbarFullscreen(true);
 
@@ -587,11 +650,15 @@ export default function RoomPage() {
       onMouseMove={handleMouseMove}
       onTouchStart={handleMouseMove}
       onClick={handleMouseMove}
-      className="h-screen max-h-screen bg-shasha-bg flex flex-col overflow-hidden select-none relative"
+      className={`bg-shasha-bg flex flex-col overflow-hidden select-none ${
+        isImmersive
+          ? 'fixed inset-0 w-screen h-[100dvh] z-[9999] bg-black'
+          : 'h-screen max-h-screen relative'
+      }`}
     >
       
       {/* Top Navigation Bar */}
-      {!isFullscreen && (
+      {!effectiveFullscreen && (
         <header className="h-16 border-b border-white/[0.06] flex items-center justify-between px-6 bg-shasha-card/50 backdrop-blur-md z-10 shrink-0">
         <div className="flex items-center gap-3">
           <div
@@ -652,7 +719,7 @@ export default function RoomPage() {
         
         {/* Left Panel: Participants Sidebar */}
         <AnimatePresence>
-          {showParticipants && !isFullscreen && (
+          {showParticipants && !effectiveFullscreen && (
             <motion.aside
               initial={{ width: 0, opacity: 0 }}
               animate={{ width: 240, opacity: 1 }}
@@ -796,7 +863,7 @@ export default function RoomPage() {
 
         {/* Right Panel: Chat Sidebar */}
         <AnimatePresence>
-          {showChat && !isFullscreen && (
+          {showChat && !effectiveFullscreen && (
             <motion.aside
               initial={{ width: 0, opacity: 0 }}
               animate={{ width: 320, opacity: 1 }}
@@ -867,12 +934,12 @@ export default function RoomPage() {
       {/* Bottom Control Toolbar */}
       <motion.footer
         animate={{
-          y: isFullscreen && !showToolbarFullscreen ? 100 : 0,
-          opacity: isFullscreen && !showToolbarFullscreen ? 0 : 1,
+          y: effectiveFullscreen && !showToolbarFullscreen ? 100 : 0,
+          opacity: effectiveFullscreen && !showToolbarFullscreen ? 0 : 1,
         }}
         transition={{ duration: 0.3, ease: 'easeInOut' }}
         className={`${
-          isFullscreen
+          effectiveFullscreen
             ? 'absolute bottom-6 left-1/2 -translate-x-1/2 w-auto bg-zinc-950/85 border border-white/10 rounded-2xl shadow-2xl backdrop-blur-lg h-16 px-6 gap-8'
             : 'h-20 border-t border-white/[0.06] bg-shasha-card/50 backdrop-blur-md w-full px-6'
         } flex items-center justify-between shrink-0 z-50 transition-all duration-300`}
@@ -944,14 +1011,14 @@ export default function RoomPage() {
           {/* Focus Mode / Fullscreen Button - Everyone */}
           <button
             onClick={toggleFocusMode}
-            title={isFullscreen ? 'إغلاق نمط التركيز' : 'نمط التركيز (ملء الشاشة)'}
+            title={effectiveFullscreen ? 'إغلاق نمط التركيز' : 'نمط التركيز (ملء الشاشة)'}
             className={`w-12 h-12 rounded-full flex items-center justify-center border transition-all scale-100 hover:scale-105 active:scale-95 cursor-pointer ${
-              isFullscreen
+              effectiveFullscreen
                 ? 'bg-shasha-accent/15 border-shasha-accent/40 text-shasha-accent'
                 : 'bg-white/5 border-white/5 text-white hover:bg-white/10'
             }`}
           >
-            {isFullscreen ? <Minimize className="w-5 h-5" /> : <Maximize className="w-5 h-5" />}
+            {effectiveFullscreen ? <Minimize className="w-5 h-5" /> : <Maximize className="w-5 h-5" />}
           </button>
         </div>
 
@@ -1082,7 +1149,7 @@ export default function RoomPage() {
 
       {/* Floating Chat Button for Cinema Mode */}
       <AnimatePresence>
-        {isFullscreen && showToolbarFullscreen && !showCinemaComposer && (
+        {effectiveFullscreen && showToolbarFullscreen && !showCinemaComposer && (
           <motion.button
             initial={{ scale: 0.8, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
@@ -1098,7 +1165,7 @@ export default function RoomPage() {
 
       {/* Cinema Composer */}
       <AnimatePresence>
-        {isFullscreen && showCinemaComposer && (
+        {effectiveFullscreen && showCinemaComposer && (
           <div className="fixed inset-0 bg-black/40 backdrop-blur-xs z-50 flex items-end sm:items-center justify-center p-4">
             {/* Click outside to close */}
             <div className="absolute inset-0" onClick={() => setShowCinemaComposer(false)} />
@@ -1133,7 +1200,7 @@ export default function RoomPage() {
       {/* Cinema Chat Toasts Container */}
       <div className="fixed bottom-24 left-6 z-50 flex flex-col gap-2 max-w-[320px] pointer-events-none">
         <AnimatePresence>
-          {isFullscreen && cinemaToasts.map((toast) => {
+          {effectiveFullscreen && cinemaToasts.map((toast) => {
             if (toast.isEmoji) {
               return (
                 <motion.div
