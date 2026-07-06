@@ -1172,9 +1172,9 @@ export default function RoomPage() {
       {/* Cinema Composer */}
       <AnimatePresence>
         {effectiveFullscreen && showCinemaComposer && (
-          <div className="fixed inset-0 bg-black/40 backdrop-blur-xs z-50 flex items-end sm:items-center justify-center p-4">
+          <div className="fixed inset-0 bg-black/40 backdrop-blur-xs z-[10002] flex items-end justify-center" style={{ touchAction: 'manipulation' }}>
             {/* Click outside to close */}
-            <div className="absolute inset-0" onClick={() => setShowCinemaComposer(false)} />
+            <div className="absolute inset-0" onClick={() => setShowCinemaComposer(false)} onTouchEnd={(e) => { e.preventDefault(); setShowCinemaComposer(false); }} />
             
             <motion.form
               initial={{ y: 50, opacity: 0, scale: 0.95 }}
@@ -1182,15 +1182,30 @@ export default function RoomPage() {
               exit={{ y: 50, opacity: 0, scale: 0.95 }}
               transition={{ duration: 0.25, ease: 'easeOut' }}
               onSubmit={handleSendCinemaMessage}
-              className="w-full max-w-md bg-zinc-950/90 border border-white/10 p-3 rounded-2xl shadow-2xl backdrop-blur-lg flex gap-2 relative z-10 mb-4 sm:mb-0"
+              className="w-full max-w-md bg-zinc-950/90 border border-white/10 p-3 rounded-2xl shadow-2xl backdrop-blur-lg flex gap-2 relative z-10 pointer-events-auto"
+              style={{ marginBottom: 'env(safe-area-inset-bottom, 12px)', paddingBottom: 4 }}
             >
               <input
-                ref={(input) => { if (input) input.focus(); }}
+                ref={(input) => {
+                  if (input) {
+                    requestAnimationFrame(() => {
+                      input.focus({ preventScroll: true });
+                    });
+                  }
+                }}
                 type="text"
+                inputMode="text"
+                enterKeyHint="send"
+                autoComplete="off"
+                autoCorrect="off"
                 value={cinemaInputText}
                 onChange={(e) => setCinemaInputText(e.target.value)}
                 placeholder="اكتب رسالة سينما شات..."
-                className="flex-1 px-4 py-2 bg-white/5 border border-white/5 focus:border-shasha-accent/40 rounded-xl text-white text-sm text-right focus:outline-none placeholder-white/30"
+                className="flex-1 px-4 py-2 bg-white/5 border border-white/5 focus:border-shasha-accent/40 rounded-xl text-white text-base text-right focus:outline-none placeholder-white/30"
+                style={{ fontSize: '16px', touchAction: 'manipulation' }}
+                onFocus={(e) => {
+                  e.target.scrollIntoView = () => {};
+                }}
               />
               <button
                 type="submit"
