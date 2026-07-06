@@ -648,8 +648,6 @@ export default function RoomPage() {
     <div
       ref={rootRef}
       onMouseMove={handleMouseMove}
-      onTouchStart={handleMouseMove}
-      onClick={handleMouseMove}
       className={`bg-shasha-bg flex flex-col overflow-hidden select-none ${
         isImmersive
           ? 'fixed inset-0 w-screen h-[100dvh] z-[9999] bg-black'
@@ -715,7 +713,14 @@ export default function RoomPage() {
       )}
 
       {/* Main Workspace Panels */}
-      <div className="flex-1 flex overflow-hidden w-full relative">
+      <div
+        className="flex-1 flex overflow-hidden w-full relative"
+        onTouchStart={(e) => {
+          if (effectiveFullscreen) {
+            handleMouseMove();
+          }
+        }}
+      >
         
         {/* Left Panel: Participants Sidebar */}
         <AnimatePresence>
@@ -938,11 +943,12 @@ export default function RoomPage() {
           opacity: effectiveFullscreen && !showToolbarFullscreen ? 0 : 1,
         }}
         transition={{ duration: 0.3, ease: 'easeInOut' }}
+        style={{ touchAction: 'manipulation' }}
         className={`${
           effectiveFullscreen
-            ? 'absolute bottom-6 left-1/2 -translate-x-1/2 w-auto bg-zinc-950/85 border border-white/10 rounded-2xl shadow-2xl backdrop-blur-lg h-16 px-6 gap-8'
+            ? 'fixed bottom-[env(safe-area-inset-bottom,6px)] left-1/2 -translate-x-1/2 w-auto bg-zinc-950/85 border border-white/10 rounded-2xl shadow-2xl backdrop-blur-lg h-16 px-6 gap-8 pointer-events-auto'
             : 'h-20 border-t border-white/[0.06] bg-shasha-card/50 backdrop-blur-md w-full px-6'
-        } flex items-center justify-between shrink-0 z-50 transition-all duration-300`}
+        } flex items-center justify-between shrink-0 z-[10000] transition-all duration-300`}
       >
         
         {/* Left Side: Room Toggles */}
@@ -1156,7 +1162,7 @@ export default function RoomPage() {
             exit={{ scale: 0.8, opacity: 0 }}
             transition={{ duration: 0.25 }}
             onClick={() => setShowCinemaComposer(true)}
-            className="fixed bottom-24 right-6 w-12 h-12 rounded-full glass-panel bg-zinc-950/80 border border-white/15 text-white flex items-center justify-center shadow-2xl hover:scale-105 active:scale-95 cursor-pointer z-50 focus:outline-none"
+            className="fixed bottom-24 right-6 w-12 h-12 rounded-full glass-panel bg-zinc-950/80 border border-white/15 text-white flex items-center justify-center shadow-2xl hover:scale-105 active:scale-95 cursor-pointer z-[10001] focus:outline-none pointer-events-auto"
           >
             <MessageSquare className="w-5 h-5 text-shasha-accent" />
           </motion.button>
