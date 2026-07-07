@@ -107,19 +107,35 @@ export default function SettingsPage() {
         const device = getDeviceName(ua);
         setDeviceInfo(`${device} (${browser})`);
 
-        if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+        if (!('serviceWorker' in navigator)) {
           setPushStatus('not_supported');
         } else {
           setPushStatus(Notification.permission as any);
           
-          navigator.serviceWorker.ready.then(async (registration) => {
-            const subscription = await registration.pushManager.getSubscription();
-            if (subscription) {
-              setRegisteredEndpoint('نشط (Registered)');
-            } else {
-              setRegisteredEndpoint('غير مسجل (Unsubscribed)');
-            }
-          });
+          if (Notification.permission === 'granted') {
+            const { NotificationService } = await import('@/lib/notificationService');
+            NotificationService.getFCMToken().then(async (token) => {
+              if (token) {
+                const { data: activeToken } = await supabase
+                  .from('notification_tokens')
+                  .select('*')
+                  .eq('token', token)
+                  .maybeSingle();
+
+                if (activeToken) {
+                  setRegisteredEndpoint('نشط (FCM Registered)');
+                } else {
+                  setRegisteredEndpoint('غير مسجل (Token missing in DB)');
+                }
+              } else {
+                setRegisteredEndpoint('غير مسجل (Unregistered)');
+              }
+            }).catch(() => {
+              setRegisteredEndpoint('غير مسجل (Error)');
+            });
+          } else {
+            setRegisteredEndpoint('غير مسجل (No permission)');
+          }
         }
       }
 
@@ -267,7 +283,7 @@ export default function SettingsPage() {
         body: JSON.stringify({
           title: 'تجربة إشعار منصة شاشة 🚀',
           body: 'هذا إشعار تجريبي للتأكد من ربط نظام الـ Web Push ونظام VAPID بالكامل بنجاح.',
-          type: 'system',
+          type: 'test',
           data: {}
         })
       });

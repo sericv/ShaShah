@@ -4,42 +4,7 @@ import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Bell, Download, X, Check } from 'lucide-react';
-
-const VAPID_PUBLIC_KEY = 'BN1UfQkqEo4C8vNr7Zx_HkHCfYIeZa754KdC5_V1HCbtA-f45k2S6LQ__nFUVmQSrcgj4ALP61xncNXWuIwTf7I';
-
-// Convert VAPID key to Uint8Array for PushManager subscription
-function urlBase64ToUint8Array(base64String: string) {
-  const padding = '='.repeat((4 - base64String.length % 4) % 4);
-  const base64 = (base64String + padding)
-    .replace(/\-/g, '+')
-    .replace(/_/g, '/');
-
-  const rawData = window.atob(base64);
-  const outputArray = new Uint8Array(rawData.length);
-
-  for (let i = 0; i < rawData.length; ++i) {
-    outputArray[i] = rawData.charCodeAt(i);
-  }
-  return outputArray;
-}
-
-function getBrowserName(ua: string) {
-  if (ua.includes('Edg/')) return 'Edge';
-  if (ua.includes('Chrome') && !ua.includes('Chromium')) return 'Chrome';
-  if (ua.includes('Safari') && !ua.includes('Chrome')) return 'Safari';
-  if (ua.includes('Firefox')) return 'Firefox';
-  return 'Browser';
-}
-
-function getDeviceName(ua: string) {
-  if (ua.includes('Android')) return 'Android Device';
-  if (ua.includes('iPhone')) return 'iPhone';
-  if (ua.includes('iPad')) return 'iPad';
-  if (ua.includes('Windows NT')) return 'Windows PC';
-  if (ua.includes('Macintosh')) return 'Mac';
-  if (ua.includes('Linux')) return 'Linux';
-  return 'Device';
-}
+import { NotificationService } from '@/lib/notificationService';
 
 export default function PWARegister() {
   const [userId, setUserId] = useState<string | null>(null);
@@ -52,19 +17,10 @@ export default function PWARegister() {
   // 1. Register Service Worker on mount
   useEffect(() => {
     if (typeof window === 'undefined') return;
-
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/service-worker.js')
-        .then((reg) => {
-          console.log('[PWA] Service Worker registered with scope:', reg.scope);
-        })
-        .catch((err) => {
-          console.error('[PWA] Service Worker registration failed:', err);
-        });
-    }
+    NotificationService.registerServiceWorker();
   }, []);
 
-  // 2. Track Supabase Auth Session for Push Subscriptions
+  // 2. Track Supabase Auth Session for FCM Push Registration
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.user) {
@@ -101,15 +57,13 @@ export default function PWARegister() {
     return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstall);
   }, []);
 
-  // Check if we should prompt for notifications
+  // Check and prompt for notification permissions
   const checkNotificationPermission = async (uid: string) => {
     if (!('Notification' in window)) return;
     
-    // If permission was already granted, auto-renew push token registration in DB
     if (Notification.permission === 'granted') {
-      await registerPushSubscription(uid);
+      await registerFCM(uid);
     } else if (Notification.permission === 'default') {
-      // Check if user dismissed notification prompt recently
       const dismissed = localStorage.getItem('shasha_notification_dismissed');
       if (!dismissed) {
         setShowPermissionPrompt(true);
@@ -117,56 +71,23 @@ export default function PWARegister() {
     }
   };
 
-  // Perform VAPID Push Subscription
-  const registerPushSubscription = async (uid: string) => {
-    if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
-
+  // Retrieve and register FCM token
+  const registerFCM = async (uid: string) => {
     try {
-      const registration = await navigator.serviceWorker.ready;
-      let subscription = await registration.pushManager.getSubscription();
-
-      if (!subscription) {
-        const convertedKey = urlBase64ToUint8Array(VAPID_PUBLIC_KEY);
-        subscription = await registration.pushManager.subscribe({
-          userVisibleOnly: true,
-          applicationServerKey: convertedKey,
-        });
+      const token = await NotificationService.getFCMToken();
+      if (token) {
+        await NotificationService.saveTokenToSupabase(uid, token);
       }
-
-      // Convert keys
-      const p256dh = btoa(String.fromCharCode(...new Uint8Array(subscription.getKey('p256dh')!)));
-      const auth = btoa(String.fromCharCode(...new Uint8Array(subscription.getKey('auth')!)));
-
-      const ua = navigator.userAgent;
-      const browser = getBrowserName(ua);
-      const platform = /Mobi|Android|iPhone/i.test(ua) ? 'mobile' : 'desktop';
-      const deviceName = getDeviceName(ua);
-
-      // Upsert subscription details
-      await supabase.from('push_subscriptions').upsert({
-        user_id: uid,
-        endpoint: subscription.endpoint,
-        p256dh: p256dh,
-        auth: auth,
-        platform: platform,
-        device_name: deviceName,
-        browser: browser,
-        last_seen: new Date().toISOString()
-      }, { onConflict: 'user_id,endpoint' });
-
-      console.log('[PWA] Push notification subscription registered successfully.');
     } catch (err) {
-      console.warn('[PWA] Push subscription registration failed:', err);
+      console.warn('[PWA] FCM Token registration failed:', err);
     }
   };
 
   const handleEnableNotifications = async () => {
     setShowPermissionPrompt(false);
-    if (!('Notification' in window)) return;
-
-    const permission = await Notification.requestPermission();
-    if (permission === 'granted' && userId) {
-      await registerPushSubscription(userId);
+    const granted = await NotificationService.requestPermission();
+    if (granted && userId) {
+      await registerFCM(userId);
     } else {
       localStorage.setItem('shasha_notification_dismissed', 'true');
     }

@@ -65,14 +65,29 @@ export async function POST(request: Request) {
       }, { status: 502 });
     }
 
-    let workerResult = {};
+    let workerResult: any = {};
     try {
       workerResult = JSON.parse(responseText);
     } catch (e) {
       workerResult = { text: responseText };
     }
 
-    return NextResponse.json({ success: true, workerResult });
+    // Check if worker reported at least one successful push delivery (status 201 or 202)
+    const hasSubscriptions = (workerResult.processed ?? 0) > 0;
+    const hasSuccessfulDelivery = workerResult.results?.some((r: any) => r.status === 200 || r.status === 201 || r.status === 202);
+
+    if (!hasSubscriptions || hasSuccessfulDelivery) {
+      return NextResponse.json({ success: true, workerResult });
+    } else {
+      console.warn('[Notify API] Push delivery failed to reach any active device. Worker result:', workerResult);
+      
+      const errorMsg = workerResult.message || 'فشلت خدمة الإرسال في تسليم الإشعارات للأجهزة النشطة.';
+      return NextResponse.json({ 
+        success: false, 
+        message: errorMsg, 
+        workerResult 
+      }, { status: 502 });
+    }
   } catch (err: any) {
     console.error('[Notify API] Unexpected error handling proxy request:', err);
     return NextResponse.json({ success: false, message: err.message }, { status: 500 });
