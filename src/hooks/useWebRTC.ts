@@ -16,6 +16,7 @@ export interface ParticipantPresence {
   isSpeaking: boolean;
   joinedAt: string;
   connectionState: 'connecting' | 'connected' | 'disconnected';
+  connectionQuality?: 'excellent' | 'average' | 'poor' | 'unknown';
 }
 
 interface RemoteStreams {
@@ -34,6 +35,55 @@ const RTC_CONFIG: RTCConfiguration = {
     { urls: 'stun:stun4.l.google.com:19302' },
   ],
 };
+
+// Evaluate peer connection quality using round-trip time and packet loss
+async function getConnectionQuality(pc: RTCPeerConnection): Promise<{ status: 'excellent' | 'average' | 'poor' | 'unknown'; rtt?: number; loss?: number }> {
+  if (!pc || pc.connectionState === 'closed') {
+    return { status: 'unknown' };
+  }
+
+  try {
+    const stats = await pc.getStats();
+    let rtt: number | undefined;
+    let packetsLost = 0;
+    let packetsReceived = 0;
+    let fractionLost: number | undefined;
+
+    stats.forEach((report) => {
+      if (report.type === 'candidate-pair' && report.state === 'succeeded' && typeof report.currentRoundTripTime === 'number') {
+        rtt = report.currentRoundTripTime * 1000;
+      }
+      if (report.type === 'inbound-rtp') {
+        if (typeof report.packetsLost === 'number') packetsLost += report.packetsLost;
+        if (typeof report.packetsReceived === 'number') packetsReceived += report.packetsReceived;
+        if (typeof report.fractionLost === 'number') fractionLost = report.fractionLost * 100;
+      }
+    });
+
+    let lossRate = 0;
+    if (typeof fractionLost === 'number') {
+      lossRate = fractionLost;
+    } else if (packetsReceived + packetsLost > 0) {
+      lossRate = (packetsLost / (packetsReceived + packetsLost)) * 100;
+    }
+
+    if (rtt === undefined && packetsReceived === 0) {
+      return { status: 'unknown' };
+    }
+
+    const finalRtt = rtt ?? 50; // fallback default
+    
+    if (finalRtt > 180 || lossRate > 5) {
+      return { status: 'poor', rtt: finalRtt, loss: lossRate };
+    } else if (finalRtt >= 80 || lossRate >= 2) {
+      return { status: 'average', rtt: finalRtt, loss: lossRate };
+    } else {
+      return { status: 'excellent', rtt: finalRtt, loss: lossRate };
+    }
+  } catch (err) {
+    return { status: 'unknown' };
+  }
+}
 
 export function useWebRTC(roomId: string, userName: string, myId: string) {
   const [localMediaStream, setLocalMediaStream] = useState<MediaStream | null>(null);
@@ -653,6 +703,11 @@ export function useWebRTC(roomId: string, userName: string, myId: string) {
           setIsHost(amHost);
         }
 
+        // Inject previously computed qualities to prevent sync reset
+        activePresences.forEach((p) => {
+          const old = participantsRef.current.find((op) => op.id === p.id);
+          p.connectionQuality = old ? (old.connectionQuality || 'unknown') : 'unknown';
+        });
         setParticipants(activePresences);
         setConnectionState('connected');
       })
@@ -774,6 +829,51 @@ export function useWebRTC(roomId: string, userName: string, myId: string) {
       }
     };
   }, [localMediaStream, micEnabled, updatePresence]);
+
+  // Poll WebRTC stats for connection quality every 2.5 seconds asynchronously
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const interval = setInterval(async () => {
+      const peerIds = Object.keys(pcs.current);
+      const qualities: { [peerId: string]: 'excellent' | 'average' | 'poor' | 'unknown' } = {};
+      
+      for (const peerId of peerIds) {
+        const pc = pcs.current[peerId];
+        const qual = await getConnectionQuality(pc);
+        qualities[peerId] = qual.status;
+      }
+
+      setParticipants((prev) => {
+        let changed = false;
+        const next = prev.map((p) => {
+          if (p.id !== myId) {
+            const newQual = qualities[p.id] || 'unknown';
+            if (p.connectionQuality !== newQual) {
+              changed = true;
+              return { ...p, connectionQuality: newQual };
+            }
+          } else {
+            // Local user connection status aggregated from all peers
+            const activeQuals = Object.values(qualities).filter((q) => q !== 'unknown');
+            let localQual: 'excellent' | 'average' | 'poor' | 'unknown' = 'excellent';
+            if (activeQuals.length > 0) {
+              if (activeQuals.includes('poor')) localQual = 'poor';
+              else if (activeQuals.includes('average')) localQual = 'average';
+            }
+            if (p.connectionQuality !== localQual) {
+              changed = true;
+              return { ...p, connectionQuality: localQual };
+            }
+          }
+          return p;
+        });
+        return changed ? next : prev;
+      });
+    }, 2500);
+
+    return () => clearInterval(interval);
+  }, [myId]);
 
   return {
     localMediaStream,

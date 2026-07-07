@@ -26,6 +26,9 @@ import {
   ScreenShare,
   Tv,
   HelpCircle,
+  Menu,
+  X,
+  UserPlus,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { supabase } from '@/lib/supabase';
@@ -38,7 +41,74 @@ interface Message {
   sender_name: string;
   content: string;
   created_at: string;
+  isSystem?: boolean;
 }
+
+const playJoinSound = () => {
+  try {
+    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+    const now = ctx.currentTime;
+    
+    const osc1 = ctx.createOscillator();
+    const gain1 = ctx.createGain();
+    osc1.type = 'sine';
+    osc1.frequency.setValueAtTime(392.00, now); // G4
+    gain1.gain.setValueAtTime(0.08, now);
+    gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
+    osc1.connect(gain1);
+    gain1.connect(ctx.destination);
+    osc1.start(now);
+    osc1.stop(now + 0.1);
+
+    const osc2 = ctx.createOscillator();
+    const gain2 = ctx.createGain();
+    osc2.type = 'sine';
+    osc2.frequency.setValueAtTime(523.25, now + 0.06); // C5
+    gain2.gain.setValueAtTime(0.08, now + 0.06);
+    gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+    osc2.connect(gain2);
+    gain2.connect(ctx.destination);
+    osc2.start(now + 0.06);
+    osc2.stop(now + 0.22);
+  } catch (e) {
+    console.warn('Join sound synthesis failed:', e);
+  }
+};
+
+const playLeaveSound = () => {
+  try {
+    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+    const now = ctx.currentTime;
+    
+    const osc1 = ctx.createOscillator();
+    const gain1 = ctx.createGain();
+    osc1.type = 'sine';
+    osc1.frequency.setValueAtTime(523.25, now); // C5
+    gain1.gain.setValueAtTime(0.08, now);
+    gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
+    osc1.connect(gain1);
+    gain1.connect(ctx.destination);
+    osc1.start(now);
+    osc1.stop(now + 0.1);
+
+    const osc2 = ctx.createOscillator();
+    const gain2 = ctx.createGain();
+    osc2.type = 'sine';
+    osc2.frequency.setValueAtTime(392.00, now + 0.06); // G4
+    gain2.gain.setValueAtTime(0.08, now + 0.06);
+    gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+    osc2.connect(gain2);
+    gain2.connect(ctx.destination);
+    osc2.start(now + 0.06);
+    osc2.stop(now + 0.22);
+  } catch (e) {
+    console.warn('Leave sound synthesis failed:', e);
+  }
+};
 
 export default function RoomPage() {
   const params = useParams();
@@ -73,9 +143,90 @@ export default function RoomPage() {
   const [showCinemaComposer, setShowCinemaComposer] = useState(false);
   const [cinemaInputText, setCinemaInputText] = useState('');
 
+  // Invite Friend Modal States
+  const [showInviteModal, setShowInviteModal] = useState(false);
+  const [friendsList, setFriendsList] = useState<any[]>([]);
+  const [invitingIds, setInvitingIds] = useState<string[]>([]);
+  const [invitedIds, setInvitedIds] = useState<string[]>([]);
+
   useEffect(() => {
     isFullscreenRef.current = isFullscreen || isImmersive;
   }, [isFullscreen, isImmersive]);
+
+  // Load friends list when invitation modal is opened
+  useEffect(() => {
+    if (!showInviteModal) return;
+
+    const fetchFriends = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+
+      const { data, error } = await supabase
+        .from('friends')
+        .select('*')
+        .or(`user_id.eq.${session.user.id},friend_id.eq.${session.user.id}`);
+
+      if (!error && data) {
+        const friendIds = data.map((f) => (f.user_id === session.user.id ? f.friend_id : f.user_id));
+        if (friendIds.length > 0) {
+          const { data: profiles } = await supabase
+            .from('profiles')
+            .select('id, name, username, avatar_url')
+            .in('id', friendIds);
+          if (profiles) {
+            setFriendsList(profiles);
+          }
+        }
+      }
+    };
+
+    fetchFriends();
+  }, [showInviteModal]);
+
+  const handleSendInvite = async (friendId: string) => {
+    setInvitingIds((prev) => [...prev, friendId]);
+    try {
+      // 1. Insert notification in Supabase notifications list
+      const { error } = await supabase
+        .from('notifications')
+        .insert({
+          user_id: friendId,
+          content: `أرسل لك ${userName} دعوة لمشاهدة جماعية في الغرفة: ${roomName}`,
+          type: 'room_invitation',
+          metadata: { roomId: roomId, senderName: userName }
+        });
+
+      if (error) throw error;
+
+      // Retrieve session token to authenticate request to backend proxy
+      const { data: { session } } = await supabase.auth.getSession();
+      const accessToken = session?.access_token;
+
+      // 2. Dispatch push notification via Next.js backend proxy
+      const res = await fetch('/api/notify', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': accessToken ? `Bearer ${accessToken}` : ''
+        },
+        body: JSON.stringify({
+          recipientId: friendId,
+          title: 'دعوة مشاهدة جماعية 🎥',
+          body: `أرسل لك ${userName} دعوة للمشاهدة معاً في الغرفة: ${roomName}`,
+          type: 'room_invitation',
+          data: { roomId: roomId }
+        })
+      });
+
+      if (res.ok) {
+        setInvitedIds((prev) => [...prev, friendId]);
+      }
+    } catch (err) {
+      console.warn('[Invite] Failed to send push request:', err);
+    } finally {
+      setInvitingIds((prev) => prev.filter((id) => id !== friendId));
+    }
+  };
 
   // Chat Data
   const [messages, setMessages] = useState<Message[]>([]);
@@ -100,10 +251,20 @@ export default function RoomPage() {
 
       const savedName = localStorage.getItem('shasha_user_name');
       setUserName(savedName || `مستخدم-${Math.floor(Math.random() * 900) + 100}`);
+
+      // Hide sidebars on mobile screens initially to avoid viewport clutter
+      const isMobile = window.innerWidth < 768;
+      if (isMobile) {
+        setShowChat(false);
+        setShowParticipants(false);
+      }
     }
   }, []);
 
   const chatChannelRef = useRef<any>(null);
+  const prevParticipantsRef = useRef<any[]>([]);
+
+
 
   // Verify Room exists
   useEffect(() => {
@@ -161,6 +322,62 @@ export default function RoomPage() {
     userName,
     myId
   );
+
+  // Detect presence changes to play chime sounds and post system chat events
+  useEffect(() => {
+    if (!webrtc.participants || webrtc.participants.length === 0) return;
+
+    // Skip initialization chime
+    if (prevParticipantsRef.current.length === 0) {
+      prevParticipantsRef.current = webrtc.participants;
+      return;
+    }
+
+    const currentIds = webrtc.participants.map((p) => p.id);
+    const prevIds = prevParticipantsRef.current.map((p) => p.id);
+
+    // Detect joins
+    webrtc.participants.forEach((p) => {
+      if (!prevIds.includes(p.id)) {
+        console.log(`[Presence] Joined: ${p.name}`);
+        playJoinSound();
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `sys-join-${Date.now()}-${p.id}`,
+            room_id: roomId,
+            sender_id: 'system',
+            sender_name: 'النظام',
+            content: `✅ انضم ${p.name} إلى الغرفة`,
+            created_at: new Date().toISOString(),
+            isSystem: true,
+          },
+        ]);
+      }
+    });
+
+    // Detect departures
+    prevParticipantsRef.current.forEach((p) => {
+      if (!currentIds.includes(p.id)) {
+        console.log(`[Presence] Left: ${p.name}`);
+        playLeaveSound();
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `sys-leave-${Date.now()}-${p.id}`,
+            room_id: roomId,
+            sender_id: 'system',
+            sender_name: 'النظام',
+            content: `❌ غادر ${p.name} الغرفة`,
+            created_at: new Date().toISOString(),
+            isSystem: true,
+          },
+        ]);
+      }
+    });
+
+    prevParticipantsRef.current = webrtc.participants;
+  }, [webrtc.participants, roomId]);
 
   // Handle Broadcast Chat Messages for Realtime Fallback
   useEffect(() => {
@@ -659,6 +876,15 @@ export default function RoomPage() {
       {!effectiveFullscreen && (
         <header className="h-16 border-b border-white/[0.06] flex items-center justify-between px-6 bg-shasha-card/50 backdrop-blur-md z-10 shrink-0">
         <div className="flex items-center gap-3">
+          {/* Hamburger Menu Button (mobile only) to toggle participants list drawer */}
+          <button
+            onClick={() => setShowParticipants(!showParticipants)}
+            className="md:hidden p-2 rounded-xl bg-white/5 border border-white/5 hover:bg-white/10 active:scale-95 transition-all cursor-pointer"
+            title="المشاركون"
+          >
+            <Menu className="w-4 h-4 text-white" />
+          </button>
+
           <div
             onClick={() => router.push('/')}
             className="w-8 h-8 rounded-lg bg-shasha-accent flex items-center justify-center cursor-pointer hover:bg-shasha-accent-hover transition-colors"
@@ -725,75 +951,123 @@ export default function RoomPage() {
         {/* Left Panel: Participants Sidebar */}
         <AnimatePresence>
           {showParticipants && !effectiveFullscreen && (
-            <motion.aside
-              initial={{ width: 0, opacity: 0 }}
-              animate={{ width: 240, opacity: 1 }}
-              exit={{ width: 0, opacity: 0 }}
-              transition={{ duration: 0.3, ease: 'easeInOut' }}
-              className="h-full border-l border-white/[0.06] bg-shasha-card/20 flex flex-col shrink-0 overflow-hidden"
-            >
-              <div className="p-4 border-b border-white/[0.04] flex items-center justify-between shrink-0">
-                <span className="text-xs font-bold uppercase tracking-wider text-shasha-secondary">المشاركون ({webrtc.participants.length})</span>
-                <Users className="w-4 h-4 text-white/30" />
-              </div>
+            <>
+              {/* Backdrop overlay for mobile (tapping outside closes it) */}
+              <div 
+                className="fixed inset-0 bg-black/60 backdrop-blur-sm z-30 md:hidden cursor-pointer"
+                onClick={() => setShowParticipants(false)}
+              />
               
-              <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-2">
-                {webrtc.participants.map((p) => {
-                  const isMe = p.id === myId;
-                  const isSpeaking = p.isSpeaking;
-                  
-                  return (
-                    <motion.div
-                      layoutId={`participant-${p.id}`}
-                      key={p.id}
-                      className={`p-2.5 rounded-xl border transition-all flex items-center justify-between ${
-                        isSpeaking
-                          ? 'bg-shasha-accent/10 border-shasha-accent/30'
-                          : 'bg-white/[0.02] border-white/[0.04] hover:bg-white/[0.04]'
-                      }`}
-                    >
-                      <div className="flex items-center gap-3">
-                        <div className="relative">
-                          {/* Speaking Ring */}
-                          {isSpeaking && (
-                            <span className="absolute inset-0 rounded-full border-2 border-shasha-accent animate-ping scale-110 opacity-70" />
-                          )}
-                          <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${
-                            isMe ? 'bg-shasha-accent text-white' : 'bg-purple-500 text-white'
-                          }`}>
-                            {p.name.substring(0, 2)}
+              <motion.aside
+                initial={{ x: '100%', opacity: 0 }}
+                animate={{ x: 0, opacity: 1 }}
+                exit={{ x: '100%', opacity: 0 }}
+                transition={{ duration: 0.25, ease: 'easeOut' }}
+                className="h-full border-l border-white/[0.06] bg-shasha-card/95 md:bg-[#0c0c0f]/90 flex flex-col shrink-0 overflow-hidden md:relative fixed top-0 right-0 z-40 w-64 shadow-2xl md:shadow-none animate-in fade-in-0 duration-200"
+              >
+                <div className="p-4 border-b border-white/[0.04] flex items-center justify-between shrink-0">
+                  <button
+                    onClick={() => setShowParticipants(false)}
+                    className="md:hidden p-1.5 rounded-lg bg-white/5 border border-white/5 hover:bg-white/10 active:scale-95 transition-all cursor-pointer"
+                    title="إغلاق"
+                  >
+                    <X className="w-4 h-4 text-white" />
+                  </button>
+                  <span className="text-xs font-bold uppercase tracking-wider text-shasha-secondary flex items-center gap-1.5 justify-end">
+                    المشاركون ({webrtc.participants.length})
+                  </span>
+                </div>
+
+                {/* Invite Friends Action Button */}
+                <div className="p-3 border-b border-white/[0.04] shrink-0">
+                  <button
+                    onClick={() => setShowInviteModal(true)}
+                    className="w-full py-2 rounded-xl bg-shasha-accent/15 border border-shasha-accent/30 text-shasha-accent text-[11px] font-bold hover:bg-shasha-accent hover:text-white transition-all cursor-pointer flex items-center justify-center gap-2"
+                  >
+                    دعوة الأصدقاء
+                    <UserPlus className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+                
+                <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-2">
+                  <AnimatePresence>
+                    {webrtc.participants.map((p) => {
+                      const isMe = p.id === myId;
+                      const isSpeaking = p.isSpeaking;
+                      
+                      return (
+                        <motion.div
+                          layout
+                          initial={{ opacity: 0, scale: 0.95 }}
+                          animate={{ opacity: 1, scale: 1 }}
+                          exit={{ opacity: 0, scale: 0.95 }}
+                          transition={{ duration: 0.25 }}
+                          key={p.id}
+                          className={`p-2.5 rounded-xl border transition-all flex items-center justify-between ${
+                            isSpeaking
+                              ? 'bg-shasha-accent/10 border-shasha-accent/30'
+                              : 'bg-white/[0.02] border-white/[0.04] hover:bg-white/[0.04]'
+                          }`}
+                        >
+                          <div className="flex items-center gap-3">
+                            <div className="relative">
+                              {/* Speaking Ring */}
+                              {isSpeaking && (
+                                <span className="absolute inset-0 rounded-full border-2 border-shasha-accent animate-ping scale-110 opacity-70" />
+                              )}
+                              <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${
+                                isMe ? 'bg-shasha-accent text-white' : 'bg-purple-500 text-white'
+                              }`}>
+                                {p.name.substring(0, 2)}
+                              </div>
+                            </div>
+
+                            <div className="flex flex-col text-right">
+                              <span className="text-xs font-bold text-white flex items-center gap-1.5 justify-end">
+                                <span className="relative group cursor-pointer flex items-center justify-center">
+                                  <span className={`w-2.5 h-2.5 rounded-full inline-block animate-pulse ${
+                                    p.connectionQuality === 'excellent' ? 'bg-shasha-success shadow-lg shadow-shasha-success/40' :
+                                    p.connectionQuality === 'average' ? 'bg-shasha-warning shadow-lg shadow-shasha-warning/40' :
+                                    p.connectionQuality === 'poor' ? 'bg-shasha-danger shadow-lg shadow-shasha-danger/40' :
+                                    'bg-zinc-500'
+                                  }`} />
+                                  {/* Tooltip */}
+                                  <span className="absolute bottom-full right-1/2 translate-x-1/2 mb-2 hidden group-hover:block bg-zinc-950 text-[9px] text-white/90 border border-white/10 px-2 py-1 rounded shadow-xl whitespace-nowrap z-50">
+                                    {p.connectionQuality === 'excellent' ? 'اتصال ممتاز (Excellent)' :
+                                     p.connectionQuality === 'average' ? 'اتصال متوسط (Average)' :
+                                     p.connectionQuality === 'poor' ? 'اتصال ضعيف (Poor)' :
+                                     'جاري التحقق...'}
+                                  </span>
+                                </span>
+                                {p.name} {isMe && <span className="text-[10px] text-white/40 font-normal">(أنت)</span>}
+                              </span>
+                              <span className="text-[9px] text-shasha-secondary flex items-center gap-1">
+                                {p.isHost && <span className="px-1 py-0.5 rounded bg-shasha-warning/10 text-shasha-warning font-semibold text-[8px]">مضيف</span>}
+                                {p.screenShareEnabled ? 'يبث الشاشة' : 'متصل'}
+                              </span>
+                            </div>
                           </div>
-                        </div>
 
-                        <div className="flex flex-col text-right">
-                          <span className="text-xs font-bold text-white flex items-center gap-1">
-                            {p.name} {isMe && <span className="text-[10px] text-white/40 font-normal">(أنت)</span>}
-                          </span>
-                          <span className="text-[9px] text-shasha-secondary flex items-center gap-1">
-                            {p.isHost && <span className="px-1 py-0.5 rounded bg-shasha-warning/10 text-shasha-warning font-semibold text-[8px]">مضيف</span>}
-                            {p.screenShareEnabled ? 'يبث الشاشة' : 'متصل'}
-                          </span>
-                        </div>
-                      </div>
-
-                      {/* Icons statuses */}
-                      <div className="flex items-center gap-1 opacity-70">
-                        {p.micEnabled ? (
-                          <Mic className={`w-3.5 h-3.5 ${isSpeaking ? 'text-shasha-accent animate-pulse' : 'text-white/40'}`} />
-                        ) : (
-                          <MicOff className="w-3.5 h-3.5 text-shasha-danger" />
-                        )}
-                        {p.camEnabled ? (
-                          <Video className="w-3.5 h-3.5 text-white/40" />
-                        ) : (
-                          <VideoOff className="w-3.5 h-3.5 text-shasha-danger" />
-                        )}
-                      </div>
-                    </motion.div>
-                  );
-                })}
-              </div>
-            </motion.aside>
+                          {/* Icons statuses */}
+                          <div className="flex items-center gap-1 opacity-70">
+                            {p.micEnabled ? (
+                              <Mic className={`w-3.5 h-3.5 ${isSpeaking ? 'text-shasha-accent animate-pulse' : 'text-white/40'}`} />
+                            ) : (
+                              <MicOff className="w-3.5 h-3.5 text-shasha-danger" />
+                            )}
+                            {p.camEnabled ? (
+                              <Video className="w-3.5 h-3.5 text-white/40" />
+                            ) : (
+                              <VideoOff className="w-3.5 h-3.5 text-shasha-danger" />
+                            )}
+                          </div>
+                        </motion.div>
+                      );
+                    })}
+                  </AnimatePresence>
+                </div>
+              </motion.aside>
+            </>
           )}
         </AnimatePresence>
 
@@ -869,68 +1143,99 @@ export default function RoomPage() {
         {/* Right Panel: Chat Sidebar */}
         <AnimatePresence>
           {showChat && !effectiveFullscreen && (
-            <motion.aside
-              initial={{ width: 0, opacity: 0 }}
-              animate={{ width: 320, opacity: 1 }}
-              exit={{ width: 0, opacity: 0 }}
-              transition={{ duration: 0.3, ease: 'easeInOut' }}
-              className="h-full border-r border-white/[0.06] bg-shasha-card/20 flex flex-col shrink-0 overflow-hidden"
-            >
-              {/* Chat Title */}
-              <div className="p-4 border-b border-white/[0.04] flex items-center justify-between shrink-0">
-                <span className="text-xs font-bold uppercase tracking-wider text-shasha-secondary">الدردشة المباشرة</span>
-                <MessageSquare className="w-4 h-4 text-white/30" />
-              </div>
+            <>
+              {/* Backdrop overlay for mobile (tapping outside closes it) */}
+              <div 
+                className="fixed inset-0 bg-black/60 backdrop-blur-sm z-30 md:hidden cursor-pointer"
+                onClick={() => setShowChat(false)}
+              />
 
-              {/* Chat Messages */}
-              <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3">
-                {messages.length === 0 ? (
-                  <div className="my-auto text-center flex flex-col items-center px-4">
-                    <MessageSquare className="w-8 h-8 text-white/10 mb-2" />
-                    <p className="text-xs text-shasha-secondary">لا توجد رسائل بعد. ابدأ محادثة جديدة!</p>
+              <motion.aside
+                initial={{ x: '-100%', opacity: 0 }}
+                animate={{ x: 0, opacity: 1 }}
+                exit={{ x: '-100%', opacity: 0 }}
+                transition={{ duration: 0.25, ease: 'easeOut' }}
+                className="h-full border-r border-white/[0.06] bg-shasha-card/95 md:bg-[#0c0c0f]/90 flex flex-col shrink-0 overflow-hidden md:relative fixed top-0 left-0 z-40 w-80 shadow-2xl md:shadow-none animate-in fade-in-0 duration-200"
+              >
+                {/* Chat Title */}
+                <div className="p-4 border-b border-white/[0.04] flex items-center justify-between shrink-0">
+                  <span className="text-xs font-bold uppercase tracking-wider text-shasha-secondary">الدردشة المباشرة</span>
+                  <div className="flex items-center gap-2">
+                    <MessageSquare className="w-4 h-4 text-white/30" />
+                    <button
+                      onClick={() => setShowChat(false)}
+                      className="md:hidden p-1.5 rounded-lg bg-white/5 border border-white/5 hover:bg-white/10 active:scale-95 transition-all cursor-pointer"
+                      title="إغلاق"
+                    >
+                      <X className="w-4 h-4 text-white" />
+                    </button>
                   </div>
-                ) : (
-                  messages.map((m) => {
-                    const isMe = m.sender_id === myId;
-                    return (
-                      <div key={m.id} className={`flex flex-col ${isMe ? 'items-start text-right' : 'items-end text-left'}`}>
-                        <div className="flex items-center gap-1.5 mb-1 px-1">
-                          <span className="text-[10px] font-bold text-white/60">{m.sender_name}</span>
-                          <span className="text-[8px] text-white/30 font-mono">
-                            {new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                          </span>
-                        </div>
-                        <div className={`p-3 rounded-[16px] text-sm break-all max-w-[85%] leading-relaxed ${
-                          isMe
-                            ? 'bg-shasha-accent text-white rounded-tr-none'
-                            : 'bg-white/5 border border-white/5 text-white/90 rounded-tl-none'
-                        }`}>
-                          {m.content}
-                        </div>
-                      </div>
-                    );
-                  })
-                )}
-                <div ref={chatEndRef} />
-              </div>
+                </div>
 
-              {/* Chat Input */}
-              <form onSubmit={handleSendMessage} className="p-3 border-t border-white/[0.04] flex gap-2 shrink-0 bg-black/10">
-                <input
-                  type="text"
-                  value={inputText}
-                  onChange={(e) => handleInputChange(e.target.value)}
-                  placeholder="اكتب رسالتك..."
-                  className="flex-1 px-4 py-2.5 rounded-xl glass-input text-right text-xs"
-                />
-                <button
-                  type="submit"
-                  className="w-10 h-10 rounded-xl bg-shasha-accent text-white flex items-center justify-center hover:bg-shasha-accent-hover active:scale-95 transition-all cursor-pointer shrink-0"
-                >
-                  <Send className="w-4 h-4" />
-                </button>
-              </form>
-            </motion.aside>
+                {/* Chat Messages */}
+                <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3">
+                  {messages.length === 0 ? (
+                    <div className="my-auto text-center flex flex-col items-center px-4">
+                      <MessageSquare className="w-8 h-8 text-white/10 mb-2" />
+                      <p className="text-xs text-shasha-secondary">لا توجد رسائل بعد. ابدأ محادثة جديدة!</p>
+                    </div>
+                  ) : (
+                    messages.map((m) => {
+                      if (m.isSystem) {
+                        return (
+                          <motion.div
+                            key={m.id}
+                            initial={{ opacity: 0, scale: 0.95 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            className="flex justify-center w-full py-1"
+                          >
+                            <span className="text-[10px] text-shasha-secondary bg-white/5 px-3 py-1 rounded-full border border-white/5 text-center font-medium">
+                              {m.content}
+                            </span>
+                          </motion.div>
+                        );
+                      }
+                      const isMe = m.sender_id === myId;
+                      return (
+                        <div key={m.id} className={`flex flex-col ${isMe ? 'items-start text-right' : 'items-end text-left'}`}>
+                          <div className="flex items-center gap-1.5 mb-1 px-1">
+                            <span className="text-[10px] font-bold text-white/60">{m.sender_name}</span>
+                            <span className="text-[8px] text-white/30 font-mono">
+                              {new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                          </div>
+                          <div className={`p-3 rounded-[16px] text-sm break-all max-w-[85%] leading-relaxed ${
+                            isMe
+                              ? 'bg-shasha-accent text-white rounded-tr-none'
+                              : 'bg-white/5 border border-white/5 text-white/90 rounded-tl-none'
+                          }`}>
+                            {m.content}
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                  <div ref={chatEndRef} />
+                </div>
+
+                {/* Chat Input */}
+                <form onSubmit={handleSendMessage} className="p-3 border-t border-white/[0.04] flex gap-2 shrink-0 bg-black/10">
+                  <input
+                    type="text"
+                    value={inputText}
+                    onChange={(e) => handleInputChange(e.target.value)}
+                    placeholder="اكتب رسالتك..."
+                    className="flex-1 px-4 py-2.5 rounded-xl glass-input text-right text-xs"
+                  />
+                  <button
+                    type="submit"
+                    className="w-10 h-10 rounded-xl bg-shasha-accent text-white flex items-center justify-center hover:bg-shasha-accent-hover active:scale-95 transition-all cursor-pointer shrink-0"
+                  >
+                    <Send className="w-4 h-4" />
+                  </button>
+                </form>
+              </motion.aside>
+            </>
           )}
         </AnimatePresence>
 
@@ -1148,6 +1453,90 @@ export default function RoomPage() {
                 تطبيق وحفظ التغييرات
               </button>
 
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Invite Friends Dialog Modal */}
+      <AnimatePresence>
+        {showInviteModal && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="w-full max-w-md glass-panel p-6 rounded-[24px] text-right flex flex-col gap-5 max-h-[85vh] overflow-hidden"
+            >
+              <div className="flex justify-between items-center border-b border-white/5 pb-3 shrink-0">
+                <button
+                  onClick={() => {
+                    setShowInviteModal(false);
+                    setInvitedIds([]); // clear invited list on close
+                  }}
+                  className="text-xs font-semibold text-shasha-secondary hover:text-white cursor-pointer"
+                >
+                  إغلاق
+                </button>
+                <h3 className="text-lg font-bold flex items-center gap-2">
+                  دعوة الأصدقاء للانضمام
+                  <UserPlus className="w-5 h-5 text-shasha-accent" />
+                </h3>
+              </div>
+
+              {/* Friends list grid */}
+              <div className="flex-1 overflow-y-auto pr-1 flex flex-col gap-3 min-h-[250px]">
+                {friendsList.length === 0 ? (
+                  <div className="my-auto text-center flex flex-col items-center py-8">
+                    <Users className="w-12 h-12 text-white/10 mb-3" />
+                    <p className="text-sm text-shasha-secondary">ليس لديك أصدقاء مضافون بعد.</p>
+                    <p className="text-xs text-white/30 mt-1">اذهب لصفحة الأصدقاء للبحث عنهم وإضافتهم!</p>
+                  </div>
+                ) : (
+                  friendsList.map((friend) => {
+                    const isInvited = invitedIds.includes(friend.id);
+                    const isInviting = invitingIds.includes(friend.id);
+                    return (
+                      <div
+                        key={friend.id}
+                        className="flex items-center justify-between p-3 rounded-2xl bg-white/[0.02] border border-white/5 hover:bg-white/[0.04] transition-colors"
+                      >
+                        <button
+                          disabled={isInvited || isInviting}
+                          onClick={() => handleSendInvite(friend.id)}
+                          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                            isInvited
+                              ? 'bg-shasha-success/10 border border-shasha-success/20 text-shasha-success cursor-default'
+                              : 'bg-shasha-accent hover:bg-shasha-accent-hover text-white active:scale-98'
+                          } disabled:opacity-50`}
+                        >
+                          {isInviting ? (
+                            <div className="w-4 h-4 rounded-full border-2 border-white border-t-transparent animate-spin mx-auto" />
+                          ) : isInvited ? (
+                            'تمت الدعوة ✓'
+                          ) : (
+                            'إرسال دعوة'
+                          )}
+                        </button>
+
+                        <div className="flex items-center gap-3">
+                          <div className="flex flex-col text-right">
+                            <span className="text-xs font-bold text-white">{friend.name}</span>
+                            <span className="text-[10px] text-shasha-secondary" dir="ltr">@{friend.username}</span>
+                          </div>
+                          <div className="w-9 h-9 rounded-full bg-purple-500/20 border border-purple-500/30 flex items-center justify-center font-bold text-xs text-purple-400 overflow-hidden shrink-0">
+                            {friend.avatar_url ? (
+                              <img src={friend.avatar_url} alt="" className="w-full h-full object-cover" />
+                            ) : (
+                              friend.name.charAt(0)
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
             </motion.div>
           </div>
         )}

@@ -1,0 +1,23 @@
+{
+  "name": "شاشة — مشاركة الشاشة بجودة فائقة",
+  "short_name": "شاشة",
+  "description": "منصة شخصية سريعة ومجانية لمشاركة الشاشة، الكاميرا، والصوت بجودة فائقة.",
+  "start_url": "/dashboard",
+  "display": "standalone",
+  "background_color": "#08080a",
+  "theme_color": "#08080a",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": [
+    "entertainment",
+    "social",
+    "utilities"
+  ]
+}

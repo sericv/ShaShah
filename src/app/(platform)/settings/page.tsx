@@ -4,7 +4,25 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { supabase } from '@/lib/supabase';
-import { Settings, User, Shield, Volume2, Globe, Trash2, Check, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { Settings, User, Shield, Volume2, Globe, Trash2, Check, AlertCircle, CheckCircle2, Bell, Monitor, Smartphone, MessageSquare, PhoneCall, UserPlus } from 'lucide-react';
+
+function getBrowserName(ua: string) {
+  if (ua.includes('Edg/')) return 'Edge';
+  if (ua.includes('Chrome') && !ua.includes('Chromium')) return 'Chrome';
+  if (ua.includes('Safari') && !ua.includes('Chrome')) return 'Safari';
+  if (ua.includes('Firefox')) return 'Firefox';
+  return 'Browser';
+}
+
+function getDeviceName(ua: string) {
+  if (ua.includes('Android')) return 'Android';
+  if (ua.includes('iPhone')) return 'iPhone';
+  if (ua.includes('iPad')) return 'iPad';
+  if (ua.includes('Windows NT')) return 'Windows PC';
+  if (ua.includes('Macintosh')) return 'Mac';
+  if (ua.includes('Linux')) return 'Linux';
+  return 'Device';
+}
 
 export default function SettingsPage() {
   const router = useRouter();
@@ -19,6 +37,20 @@ export default function SettingsPage() {
   const [favoriteGenre, setFavoriteGenre] = useState('');
   const [soundMuted, setSoundMuted] = useState(false);
   const [privacy, setPrivacy] = useState('public');
+
+  // Push Notification Settings preferences
+  const [notifyRoomInvites, setNotifyRoomInvites] = useState(true);
+  const [notifyFriendRequests, setNotifyFriendRequests] = useState(true);
+  const [notifyMessages, setNotifyMessages] = useState(true);
+  const [notifyCalls, setNotifyCalls] = useState(true);
+  const [notifySystem, setNotifySystem] = useState(true);
+
+  // Push Subscription Status variables
+  const [pushStatus, setPushStatus] = useState<'granted' | 'denied' | 'default' | 'not_supported'>('default');
+  const [deviceInfo, setDeviceInfo] = useState('');
+  const [registeredEndpoint, setRegisteredEndpoint] = useState('لا يوجد اشتراك نشط');
+  const [lastNotificationReceived, setLastNotificationReceived] = useState<string>('لا يوجد');
+  const [testingPush, setTestingPush] = useState(false);
 
   // Username validation checking states
   const [usernameChecking, setUsernameChecking] = useState(false);
@@ -61,7 +93,36 @@ export default function SettingsPage() {
       if (sett) {
         setSoundMuted(sett.sound_muted);
         setPrivacy(sett.privacy_status || 'public');
+        setNotifyRoomInvites(sett.notify_room_invites !== false);
+        setNotifyFriendRequests(sett.notify_friend_requests !== false);
+        setNotifyMessages(sett.notify_messages !== false);
+        setNotifyCalls(sett.notify_calls !== false);
+        setNotifySystem(sett.notify_system !== false);
       }
+
+      // Device & Browser status check
+      if (typeof window !== 'undefined') {
+        const ua = navigator.userAgent;
+        const browser = getBrowserName(ua);
+        const device = getDeviceName(ua);
+        setDeviceInfo(`${device} (${browser})`);
+
+        if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+          setPushStatus('not_supported');
+        } else {
+          setPushStatus(Notification.permission as any);
+          
+          navigator.serviceWorker.ready.then(async (registration) => {
+            const subscription = await registration.pushManager.getSubscription();
+            if (subscription) {
+              setRegisteredEndpoint('نشط (Registered)');
+            } else {
+              setRegisteredEndpoint('غير مسجل (Unsubscribed)');
+            }
+          });
+        }
+      }
+
       setLoading(false);
     };
 
@@ -147,21 +208,27 @@ export default function SettingsPage() {
         .eq('user_id', profile.id)
         .maybeSingle();
 
+      const settingsPayload = {
+        sound_muted: soundMuted,
+        privacy_status: privacy,
+        notify_room_invites: notifyRoomInvites,
+        notify_friend_requests: notifyFriendRequests,
+        notify_messages: notifyMessages,
+        notify_calls: notifyCalls,
+        notify_system: notifySystem
+      };
+
       if (existingSettings) {
         await supabase
           .from('user_settings')
-          .update({
-            sound_muted: soundMuted,
-            privacy_status: privacy
-          })
+          .update(settingsPayload)
           .eq('user_id', profile.id);
       } else {
         await supabase
           .from('user_settings')
           .insert({
             user_id: profile.id,
-            sound_muted: soundMuted,
-            privacy_status: privacy
+            ...settingsPayload
           });
       }
 
@@ -180,6 +247,41 @@ export default function SettingsPage() {
       setErrorMsg('فشل حفظ الإعدادات، يرجى المحاولة لاحقاً');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleTestNotification = async () => {
+    setTestingPush(true);
+    setErrorMsg('');
+    setSuccessMsg('');
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const accessToken = session?.access_token;
+
+      const res = await fetch('/api/notify', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': accessToken ? `Bearer ${accessToken}` : ''
+        },
+        body: JSON.stringify({
+          title: 'تجربة إشعار منصة شاشة 🚀',
+          body: 'هذا إشعار تجريبي للتأكد من ربط نظام الـ Web Push ونظام VAPID بالكامل بنجاح.',
+          type: 'system',
+          data: {}
+        })
+      });
+      if (res.ok) {
+        setSuccessMsg('تم إرسال إشعار تجريبي لجهازك بنجاح!');
+        setLastNotificationReceived(new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+      } else {
+        const errorData = await res.json();
+        setErrorMsg(`فشل إرسال الإشعار التجريبي: ${errorData.message || 'خطأ غير معروف'}`);
+      }
+    } catch (err) {
+      setErrorMsg('فشل الاتصال بخادم الإشعارات.');
+    } finally {
+      setTestingPush(false);
     }
   };
 
@@ -359,6 +461,136 @@ export default function SettingsPage() {
                 <option value="public" className="bg-shasha-card text-white">حساب عام (يمكن للجميع البحث عنك)</option>
                 <option value="private" className="bg-shasha-card text-white">حساب خاص (مخفي من البحث)</option>
               </select>
+            </div>
+          </div>
+        </div>
+
+        {/* Push Notifications Section */}
+        <div className="glass-panel p-6 rounded-3xl border border-white/5 flex flex-col gap-5">
+          <h3 className="text-sm font-bold text-white/50 flex items-center justify-end gap-2 border-b border-white/5 pb-2">
+            إعدادات الإشعارات الفورية (Push Notifications)
+            <Bell className="w-4 h-4 text-shasha-accent" />
+          </h3>
+
+          {/* Subscriptions Status Info Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-white/[0.02] p-4 rounded-2xl border border-white/5 text-xs">
+            <div className="flex flex-col gap-2">
+              <div className="flex justify-between items-center">
+                <span className="font-mono text-white/70" dir="ltr">{deviceInfo || 'جاري التحقق...'}</span>
+                <span className="text-shasha-secondary font-medium">الجهاز الحالي:</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className={`font-semibold ${pushStatus === 'granted' ? 'text-shasha-success' : 'text-shasha-danger'}`}>
+                  {pushStatus === 'granted' ? 'مسموح (Granted)' :
+                   pushStatus === 'denied' ? 'مرفوض (Denied)' :
+                   pushStatus === 'not_supported' ? 'غير مدعوم في هذا المتصفح' : 'غير محدد (Default)'}
+                </span>
+                <span className="text-shasha-secondary font-medium">صلاحية المتصفح:</span>
+              </div>
+            </div>
+            
+            <div className="flex flex-col gap-2">
+              <div className="flex justify-between items-center">
+                <span className="font-mono text-white/70">{registeredEndpoint}</span>
+                <span className="text-shasha-secondary font-medium">حالة الاشتراك في الخدمة:</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="font-mono text-white/70">{lastNotificationReceived}</span>
+                <span className="text-shasha-secondary font-medium">آخر إشعار مستلم:</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Preferences Toggles */}
+          <div className="flex flex-col gap-3">
+            <label className="block text-xs font-semibold text-shasha-secondary">تفضيلات إرسال التنبيهات</label>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+              
+              <button
+                type="button"
+                onClick={() => setNotifyRoomInvites(!notifyRoomInvites)}
+                className={`p-3 rounded-xl border text-xs font-semibold flex items-center justify-between transition-all cursor-pointer ${
+                  notifyRoomInvites
+                    ? 'bg-shasha-accent/5 border-shasha-accent/20 text-white'
+                    : 'bg-white/2 border-white/5 text-shasha-secondary'
+                }`}
+              >
+                <span>دعوات الغرف (Room Invitations)</span>
+                <Monitor className="w-4 h-4 text-shasha-accent" />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setNotifyFriendRequests(!notifyFriendRequests)}
+                className={`p-3 rounded-xl border text-xs font-semibold flex items-center justify-between transition-all cursor-pointer ${
+                  notifyFriendRequests
+                    ? 'bg-shasha-accent/5 border-shasha-accent/20 text-white'
+                    : 'bg-white/2 border-white/5 text-shasha-secondary'
+                }`}
+              >
+                <span>طلبات الصداقة (Friend Requests)</span>
+                <UserPlus className="w-4 h-4 text-shasha-accent" />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setNotifyMessages(!notifyMessages)}
+                className={`p-3 rounded-xl border text-xs font-semibold flex items-center justify-between transition-all cursor-pointer ${
+                  notifyMessages
+                    ? 'bg-shasha-accent/5 border-shasha-accent/20 text-white'
+                    : 'bg-white/2 border-white/5 text-shasha-secondary'
+                }`}
+              >
+                <span>الرسائل الجديدة (Messages)</span>
+                <MessageSquare className="w-4 h-4 text-shasha-accent" />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setNotifyCalls(!notifyCalls)}
+                className={`p-3 rounded-xl border text-xs font-semibold flex items-center justify-between transition-all cursor-pointer ${
+                  notifyCalls
+                    ? 'bg-shasha-accent/5 border-shasha-accent/20 text-white'
+                    : 'bg-white/2 border-white/5 text-shasha-secondary'
+                }`}
+              >
+                <span>دعوات الاتصال (Calls)</span>
+                <PhoneCall className="w-4 h-4 text-shasha-accent" />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setNotifySystem(!notifySystem)}
+                className={`p-3 rounded-xl border text-xs font-semibold flex items-center justify-between transition-all cursor-pointer ${
+                  notifySystem
+                    ? 'bg-shasha-accent/5 border-shasha-accent/20 text-white'
+                    : 'bg-white/2 border-white/5 text-shasha-secondary'
+                }`}
+              >
+                <span>تحديثات النظام العامة (System Updates)</span>
+                <Globe className="w-4 h-4 text-shasha-accent" />
+              </button>
+
+              {/* Test Notification Action */}
+              <button
+                type="button"
+                onClick={handleTestNotification}
+                disabled={testingPush || pushStatus !== 'granted'}
+                className="p-3 rounded-xl border border-shasha-accent/30 text-shasha-accent bg-shasha-accent/5 hover:bg-shasha-accent hover:text-white font-bold text-xs flex items-center justify-between transition-all cursor-pointer disabled:opacity-50"
+              >
+                {testingPush ? (
+                  <>
+                    <span>جاري الإرسال...</span>
+                    <div className="w-4 h-4 rounded-full border border-shasha-accent border-t-transparent animate-spin" />
+                  </>
+                ) : (
+                  <>
+                    <span>إرسال إشعار تجريبي (Test Push)</span>
+                    <Smartphone className="w-4 h-4" />
+                  </>
+                )}
+              </button>
+
             </div>
           </div>
         </div>

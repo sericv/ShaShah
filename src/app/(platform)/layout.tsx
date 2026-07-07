@@ -18,7 +18,12 @@ import {
   ChevronLeft,
   X,
   Volume2,
-  Sparkles
+  Sparkles,
+  Menu,
+  Trash2,
+  UserPlus,
+  MessageSquare,
+  PhoneCall
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -68,6 +73,9 @@ export default function PlatformLayout({
   // Realtime active toast notifications
   const [toasts, setToasts] = useState<{ id: string; content: string }[]>([]);
   const [soundMuted, setSoundMuted] = useState(false);
+
+  // Mobile sidebar open state
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const notificationMenuRef = useRef<HTMLDivElement>(null);
   const searchContainerRef = useRef<HTMLDivElement>(null);
@@ -342,6 +350,27 @@ export default function PlatformLayout({
     return () => clearTimeout(delayDebounceFn);
   }, [searchQuery, profile]);
 
+  const handleMarkRead = async (id: string) => {
+    await supabase
+      .from('notifications')
+      .update({ is_read: true })
+      .eq('id', id);
+
+    setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, is_read: true } : n)));
+    setUnreadNotificationsCount((prev) => Math.max(0, prev - 1));
+  };
+
+  const handleDeleteNotification = async (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    await supabase.from('notifications').delete().eq('id', id);
+    
+    const deleted = notifications.find((n) => n.id === id);
+    setNotifications((prev) => prev.filter((n) => n.id !== id));
+    if (deleted && !deleted.is_read) {
+      setUnreadNotificationsCount((prev) => Math.max(0, prev - 1));
+    }
+  };
+
   const handleMarkAllRead = async () => {
     if (!profile) return;
     await supabase
@@ -380,16 +409,42 @@ export default function PlatformLayout({
   return (
     <div className="min-h-screen bg-[#08080a] text-white flex select-none overflow-hidden h-screen max-h-screen">
       
-      {/* 1. Permanent Right Sidebar */}
-      <aside className="w-64 border-l border-white/[0.04] bg-[#0c0c0f]/90 flex flex-col justify-between shrink-0 z-20 h-full">
+      {/* Backdrop overlay for mobile */}
+      <AnimatePresence>
+        {sidebarOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setSidebarOpen(false)}
+            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 md:hidden cursor-pointer"
+          />
+        )}
+      </AnimatePresence>
+
+      {/* 1. Permanent Right Sidebar (Responsive: sliding in on mobile, static on desktop) */}
+      <aside
+        className={`w-64 border-l border-white/[0.04] bg-[#0c0c0f]/95 flex flex-col justify-between shrink-0 h-full z-50 md:z-20 md:relative fixed top-0 right-0 transition-transform duration-300 ease-in-out md:translate-x-0 ${
+          sidebarOpen ? 'translate-x-0' : 'translate-x-full md:translate-x-0'
+        }`}
+      >
         <div className="flex flex-col">
-          {/* Logo */}
-          <div className="h-16 flex items-center justify-end px-6 border-b border-white/[0.04]">
-            <span className="text-lg font-bold tracking-wider font-sans">
-              شاشة <span className="text-shasha-accent">Shasha</span>
-            </span>
-            <div className="w-8 h-8 rounded-lg bg-shasha-accent flex items-center justify-center shadow-lg shadow-shasha-accent/25 ml-3">
-              <Monitor className="w-4 h-4 text-white" />
+          {/* Logo with Close button on mobile */}
+          <div className="h-16 flex items-center justify-between md:justify-end px-6 border-b border-white/[0.04]">
+            <button
+              onClick={() => setSidebarOpen(false)}
+              className="md:hidden p-1.5 rounded-lg bg-white/5 border border-white/5 hover:bg-white/10 active:scale-95 transition-all cursor-pointer"
+              title="إغلاق القائمة"
+            >
+              <X className="w-4 h-4 text-white" />
+            </button>
+            <div className="flex items-center">
+              <span className="text-lg font-bold tracking-wider font-sans">
+                شاشة <span className="text-shasha-accent">Shasha</span>
+              </span>
+              <div className="w-8 h-8 rounded-lg bg-shasha-accent flex items-center justify-center shadow-lg shadow-shasha-accent/25 ml-3">
+                <Monitor className="w-4 h-4 text-white" />
+              </div>
             </div>
           </div>
 
@@ -401,6 +456,7 @@ export default function PlatformLayout({
                 <Link
                   key={link.href}
                   href={link.href}
+                  onClick={() => setSidebarOpen(false)}
                   className={`flex items-center justify-end gap-3 px-4 py-3 rounded-xl transition-all font-semibold text-sm hover:scale-[1.01] active:scale-[0.99] cursor-pointer ${
                     active
                       ? 'bg-shasha-accent/15 text-shasha-accent border-r-4 border-shasha-accent'
@@ -432,7 +488,10 @@ export default function PlatformLayout({
           </div>
 
           <button
-            onClick={handleLogout}
+            onClick={() => {
+              setSidebarOpen(false);
+              handleLogout();
+            }}
             className="flex items-center justify-center gap-2 py-2.5 rounded-xl border border-shasha-danger/25 text-shasha-danger hover:bg-shasha-danger hover:text-white transition-all text-xs font-bold cursor-pointer"
           >
             تسجيل الخروج
@@ -444,79 +503,88 @@ export default function PlatformLayout({
       {/* 2. Main Content Wrapper */}
       <div className="flex-1 flex flex-col min-w-0 h-full relative overflow-hidden">
         {/* Top Header Controls Bar */}
-        <header className="h-16 border-b border-white/[0.04] bg-[#08080a]/80 backdrop-blur-md flex items-center justify-between px-8 z-10 shrink-0">
-          {/* Right: Search Input Bar */}
-          <div ref={searchContainerRef} className="relative w-80">
-            <div className="relative">
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                onFocus={() => setSearchFocused(true)}
-                placeholder="ابحث عن أفلام، أصدقاء أو غرف..."
-                className="w-full pl-4 pr-10 py-2 rounded-xl glass-input text-right text-xs"
-              />
-              <Search className="absolute top-1/2 right-3 -translate-y-1/2 w-4 h-4 text-white/30" />
-            </div>
+        <header className="h-16 border-b border-white/[0.04] bg-[#08080a]/80 backdrop-blur-md flex items-center justify-between px-4 sm:px-8 z-10 shrink-0">
+          {/* Right: Hamburger button & Search Input Bar */}
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setSidebarOpen(true)}
+              className="md:hidden p-2 rounded-xl bg-white/5 border border-white/5 hover:bg-white/10 active:scale-95 transition-all cursor-pointer"
+              title="القائمة"
+            >
+              <Menu className="w-5 h-5 text-white" />
+            </button>
+            <div ref={searchContainerRef} className="relative w-48 sm:w-80">
+              <div className="relative">
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onFocus={() => setSearchFocused(true)}
+                  placeholder="ابحث عن أفلام، أصدقاء أو غرف..."
+                  className="w-full pl-4 pr-10 py-2 rounded-xl glass-input text-right text-xs"
+                />
+                <Search className="absolute top-1/2 right-3 -translate-y-1/2 w-4 h-4 text-white/30" />
+              </div>
 
-            {/* Instant Search Results Dropdown */}
-            <AnimatePresence>
-              {searchFocused && (searchQuery.trim() || searchResults.length > 0) && (
-                <motion.div
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: 10 }}
-                  className="absolute top-12 right-0 w-96 max-h-[400px] overflow-y-auto glass-panel p-3 rounded-2xl z-50 text-right flex flex-col gap-2.5 shadow-2xl"
-                >
-                  <div className="flex justify-between items-center px-1 border-b border-white/5 pb-1.5">
-                    <button
-                      onClick={() => setSearchQuery('')}
-                      className="text-[10px] text-shasha-secondary hover:text-white transition-colors"
-                    >
-                      مسح
-                    </button>
-                    <span className="text-[10px] font-bold text-white/40">نتائج البحث الفورية</span>
-                  </div>
-
-                  <div className="flex flex-col gap-1.5">
-                    {searchResults.map((result) => (
-                      <div
-                        key={`${result.type}-${result.id}`}
-                        onClick={() => {
-                          setSearchFocused(false);
-                          setSearchQuery('');
-                          if (result.type === 'movie' || result.type === 'tv') {
-                            router.push(`/explore?movieId=${result.id}`);
-                          } else if (result.type === 'friend') {
-                            router.push(`/friends?friendId=${result.id}`);
-                          } else if (result.type === 'room') {
-                            router.push(`/room/${result.room_id}`);
-                          }
-                        }}
-                        className="flex items-center justify-between p-2 rounded-xl hover:bg-white/5 cursor-pointer transition-colors"
+              {/* Instant Search Results Dropdown */}
+              <AnimatePresence>
+                {searchFocused && (searchQuery.trim() || searchResults.length > 0) && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: 10 }}
+                    className="absolute top-12 right-0 w-72 sm:w-96 max-h-[400px] overflow-y-auto glass-panel p-3 rounded-2xl z-50 text-right flex flex-col gap-2.5 shadow-2xl"
+                  >
+                    <div className="flex justify-between items-center px-1 border-b border-white/5 pb-1.5">
+                      <button
+                        onClick={() => setSearchQuery('')}
+                        className="text-[10px] text-shasha-secondary hover:text-white transition-colors"
                       >
-                        <div className="text-[10px] bg-white/5 border border-white/5 px-2 py-0.5 rounded text-white/60">
-                          {result.type === 'movie' ? 'فيلم' : result.type === 'tv' ? 'مسلسل' : result.type === 'friend' ? 'صديق' : 'غرفة'}
+                        مسح
+                      </button>
+                      <span className="text-[10px] font-bold text-white/40">نتائج البحث الفورية</span>
+                    </div>
+
+                    <div className="flex flex-col gap-1.5">
+                      {searchResults.map((result) => (
+                        <div
+                          key={`${result.type}-${result.id}`}
+                          onClick={() => {
+                            setSearchFocused(false);
+                            setSearchQuery('');
+                            if (result.type === 'movie' || result.type === 'tv') {
+                              router.push(`/explore?movieId=${result.id}`);
+                            } else if (result.type === 'friend') {
+                              router.push(`/friends?friendId=${result.id}`);
+                            } else if (result.type === 'room') {
+                              router.push(`/room/${result.room_id}`);
+                            }
+                          }}
+                          className="flex items-center justify-between p-2 rounded-xl hover:bg-white/5 cursor-pointer transition-colors"
+                        >
+                          <div className="text-[10px] bg-white/5 border border-white/5 px-2 py-0.5 rounded text-white/60">
+                            {result.type === 'movie' ? 'فيلم' : result.type === 'tv' ? 'مسلسل' : result.type === 'friend' ? 'صديق' : 'غرفة'}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-semibold text-white">{result.title}</span>
+                            {result.poster_path && (
+                              <img
+                                src={`https://image.tmdb.org/t/p/w92${result.poster_path}`}
+                                alt=""
+                                className="w-6 h-8 rounded object-cover"
+                              />
+                            )}
+                          </div>
                         </div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs font-semibold text-white">{result.title}</span>
-                          {result.poster_path && (
-                            <img
-                              src={`https://image.tmdb.org/t/p/w92${result.poster_path}`}
-                              alt=""
-                              className="w-6 h-8 rounded object-cover"
-                            />
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                    {searchQuery.trim() && searchResults.length === 0 && (
-                      <span className="text-center text-xs text-shasha-secondary py-4">لا توجد نتائج مطابقة</span>
-                    )}
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
+                      ))}
+                      {searchQuery.trim() && searchResults.length === 0 && (
+                        <span className="text-center text-xs text-shasha-secondary py-4">لا توجد نتائج مطابقة</span>
+                      )}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
           </div>
 
           {/* Left: Notification Bell & Settings shortcuts */}
@@ -560,21 +628,42 @@ export default function PlatformLayout({
                     </div>
 
                     <div className="flex flex-col gap-1.5">
-                      {notifications.map((notif) => (
-                        <div
-                          key={notif.id}
-                          className={`p-2.5 rounded-xl border transition-colors ${
-                            notif.is_read
-                              ? 'bg-transparent border-transparent text-white/50'
-                              : 'bg-shasha-accent/5 border-shasha-accent/10 text-white font-medium'
-                          }`}
-                        >
-                          <p className="text-[11px] leading-relaxed">{notif.content}</p>
-                          <span className="text-[8px] text-white/30 block mt-1">
-                            {new Date(notif.created_at).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })}
-                          </span>
-                        </div>
-                      ))}
+                      {notifications.map((notif) => {
+                        const IconComponent = notif.type === 'room_invitation' ? Monitor :
+                                              notif.type === 'friend_request' ? UserPlus :
+                                              notif.type === 'friend_accepted' ? User :
+                                              notif.type === 'new_message' ? MessageSquare :
+                                              notif.type === 'call_invitation' ? PhoneCall :
+                                              Sparkles;
+                        return (
+                          <div
+                            key={notif.id}
+                            onClick={() => !notif.is_read && handleMarkRead(notif.id)}
+                            className={`p-2.5 rounded-xl border transition-all flex items-start justify-between gap-3 text-right cursor-pointer ${
+                              notif.is_read
+                                ? 'bg-transparent border-white/5 text-white/50'
+                                : 'bg-shasha-accent/5 border-shasha-accent/15 text-white font-medium hover:bg-shasha-accent/10'
+                            }`}
+                          >
+                            <button
+                              onClick={(e) => handleDeleteNotification(notif.id, e)}
+                              className="text-white/30 hover:text-shasha-danger p-0.5 rounded transition-colors shrink-0 cursor-pointer"
+                              title="حذف الإشعار"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                            <div className="flex-1 flex flex-col gap-0.5 min-w-0">
+                              <p className="text-[11px] leading-relaxed break-words">{notif.content}</p>
+                              <span className="text-[8px] text-white/30 font-mono mt-1 block">
+                                {new Date(notif.created_at).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })}
+                              </span>
+                            </div>
+                            <div className="w-7 h-7 rounded-lg bg-white/5 border border-white/5 flex items-center justify-center shrink-0">
+                              <IconComponent className="w-3.5 h-3.5 text-shasha-accent" />
+                            </div>
+                          </div>
+                        );
+                      })}
                       {notifications.length === 0 && (
                         <span className="text-center text-xs text-shasha-secondary py-6">لا توجد إشعارات حالياً</span>
                       )}
