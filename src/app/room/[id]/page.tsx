@@ -211,10 +211,15 @@ export default function RoomPage() {
         },
         body: JSON.stringify({
           recipientId: friendId,
-          title: 'دعوة مشاهدة جماعية 🎥',
-          body: `أرسل لك ${userName} دعوة للمشاهدة معاً في الغرفة: ${roomName}`,
+          title: '🎮 دعوة جديدة',
+          body: `قام ${userName} بدعوتك إلى غرفة.`,
           type: 'room_invitation',
-          data: { roomId: roomId }
+          data: {
+            type: 'room_invite',
+            roomId: roomId,
+            senderId: myId,
+            senderName: userName
+          }
         })
       });
 

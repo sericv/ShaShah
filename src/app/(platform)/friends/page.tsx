@@ -217,6 +217,28 @@ export default function FriendsPage() {
           content: `قام @${myUsername} بإرسال طلب صداقة.`,
           type: 'friend_request'
         });
+
+        // Send push notification via Next.js backend proxy
+        const sessionRes = await supabase.auth.getSession();
+        const accessToken = sessionRes.data.session?.access_token;
+        
+        fetch('/api/notify', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': accessToken ? `Bearer ${accessToken}` : ''
+          },
+          body: JSON.stringify({
+            recipientId: receiverId,
+            title: '👤 طلب صداقة',
+            body: `${myName} أرسل لك طلب صداقة.`,
+            type: 'friend_request',
+            data: {
+              type: 'friend_request',
+              senderId: profile.id
+            }
+          })
+        }).catch((err) => console.warn('Failed to send friend request FCM notification:', err));
       }
     } catch (err) {
       setErrorMsg('حدث خطأ غير متوقع');
