@@ -222,23 +222,35 @@ export default function FriendsPage() {
         const sessionRes = await supabase.auth.getSession();
         const accessToken = sessionRes.data.session?.access_token;
         
+        const notifyPayload = {
+          recipientId: receiverId,
+          title: '👤 طلب صداقة',
+          body: `${myName} أرسل لك طلب صداقة.`,
+          type: 'friend_request',
+          data: {
+            type: 'friend_request',
+            senderId: profile.id
+          }
+        };
+
+        console.log('[handleSendRequest] Triggering FCM notification');
+        console.log('[handleSendRequest] Recipient (receiverId):', receiverId);
+        console.log('[handleSendRequest] Payload:', notifyPayload);
+
         fetch('/api/notify', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             'Authorization': accessToken ? `Bearer ${accessToken}` : ''
           },
-          body: JSON.stringify({
-            recipientId: receiverId,
-            title: '👤 طلب صداقة',
-            body: `${myName} أرسل لك طلب صداقة.`,
-            type: 'friend_request',
-            data: {
-              type: 'friend_request',
-              senderId: profile.id
-            }
-          })
-        }).catch((err) => console.warn('Failed to send friend request FCM notification:', err));
+          body: JSON.stringify(notifyPayload)
+        })
+        .then(async (res) => {
+          console.log('[handleSendRequest] /api/notify Response Status:', res.status);
+          const text = await res.text();
+          console.log('[handleSendRequest] /api/notify Response Body:', text);
+        })
+        .catch((err) => console.error('[handleSendRequest] Failed to send friend request FCM notification:', err));
       }
     } catch (err) {
       setErrorMsg('حدث خطأ غير متوقع');

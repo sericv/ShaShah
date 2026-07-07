@@ -202,6 +202,23 @@ export default function RoomPage() {
       const { data: { session } } = await supabase.auth.getSession();
       const accessToken = session?.access_token;
 
+      const notifyPayload = {
+        recipientId: friendId,
+        title: '🎮 دعوة جديدة',
+        body: `قام ${userName} بدعوتك إلى غرفة.`,
+        type: 'room_invitation',
+        data: {
+          type: 'room_invite',
+          roomId: roomId,
+          senderId: myId,
+          senderName: userName
+        }
+      };
+
+      console.log('[handleSendInvite] Triggering FCM notification');
+      console.log('[handleSendInvite] Recipient (friendId):', friendId);
+      console.log('[handleSendInvite] Payload:', notifyPayload);
+
       // 2. Dispatch push notification via Next.js backend proxy
       const res = await fetch('/api/notify', {
         method: 'POST',
@@ -209,25 +226,20 @@ export default function RoomPage() {
           'Content-Type': 'application/json',
           'Authorization': accessToken ? `Bearer ${accessToken}` : ''
         },
-        body: JSON.stringify({
-          recipientId: friendId,
-          title: '🎮 دعوة جديدة',
-          body: `قام ${userName} بدعوتك إلى غرفة.`,
-          type: 'room_invitation',
-          data: {
-            type: 'room_invite',
-            roomId: roomId,
-            senderId: myId,
-            senderName: userName
-          }
-        })
+        body: JSON.stringify(notifyPayload)
       });
+
+      console.log('[handleSendInvite] /api/notify Response Status:', res.status);
+      const resText = await res.text();
+      console.log('[handleSendInvite] /api/notify Response Body:', resText);
 
       if (res.ok) {
         setInvitedIds((prev) => [...prev, friendId]);
+      } else {
+        console.warn('[handleSendInvite] Failed to send push request, not ok. Status:', res.status);
       }
     } catch (err) {
-      console.warn('[Invite] Failed to send push request:', err);
+      console.error('[handleSendInvite] Exception while sending push request:', err);
     } finally {
       setInvitingIds((prev) => prev.filter((id) => id !== friendId));
     }
