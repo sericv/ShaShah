@@ -432,7 +432,7 @@ export default function FriendsPage() {
                   </div>
 
                   {/* Friend Details */}
-                  <div className="flex items-center gap-3">
+                  <div onClick={() => router.push(`/profile?userId=${friend.id}`)} className="flex items-center gap-3 cursor-pointer">
                     <div className="flex flex-col text-right">
                       <span className="text-sm font-bold text-white">{friend.name}</span>
                       <span className="text-[10px] text-shasha-accent font-medium select-none" dir="ltr">
@@ -576,45 +576,53 @@ export default function FriendsPage() {
             <div className="flex flex-col gap-3">
               {searchResults.length > 0 ? (
                 searchResults.map((user) => (
-                  <div
-                    key={user.id}
-                    className="p-4 rounded-2xl bg-white/3 hover:bg-white/5 border border-white/5 flex items-center justify-between gap-4 transition-all"
-                  >
-                    <button
-                      onClick={() => handleSendRequest(user.id, user.username)}
-                      className="px-4 py-2 rounded-xl bg-shasha-accent text-white text-xs font-bold hover:bg-shasha-accent-hover active:scale-[0.98] transition-all flex items-center gap-1.5 cursor-pointer"
+                    <div
+                      key={user.id}
+                      className="p-4 rounded-2xl bg-white/3 hover:bg-white/5 border border-white/5 flex items-center justify-between gap-4 transition-all"
                     >
-                      إضافة صديق
-                      <UserPlus className="w-3.5 h-3.5" />
-                    </button>
-
-                    <div className="flex items-center gap-3">
-                      <div className="flex flex-col text-right">
-                        <span className="text-sm font-bold text-white">{user.name}</span>
-                        <span className="text-[10px] text-shasha-accent" dir="ltr">@{user.username}</span>
-                        
-                        {user.is_online ? (
-                          <span className="text-[9px] text-shasha-success font-medium flex items-center gap-1 mt-1 justify-end">
-                            متصل
-                            <span className="w-1.5 h-1.5 rounded-full bg-shasha-success" />
-                          </span>
-                        ) : (
-                          <span className="text-[9px] text-shasha-secondary mt-1 flex items-center gap-1 justify-end">
-                            غير متصل
-                            <span className="w-1.5 h-1.5 rounded-full bg-white/10" />
-                          </span>
-                        )}
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => handleSendRequest(user.id, user.username)}
+                          className="px-4 py-2 rounded-xl bg-shasha-accent text-white text-xs font-bold hover:bg-shasha-accent-hover active:scale-[0.98] transition-all flex items-center gap-1.5 cursor-pointer"
+                        >
+                          إضافة صديق
+                          <UserPlus className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => router.push(`/profile?userId=${user.id}`)}
+                          className="px-3 py-2 rounded-xl bg-white/5 text-white text-xs font-semibold hover:bg-white/10 transition-all cursor-pointer"
+                        >
+                          الملف
+                        </button>
                       </div>
 
-                      <div className="w-10 h-10 rounded-full bg-shasha-accent/25 flex items-center justify-center font-bold text-sm text-shasha-accent overflow-hidden">
-                        {user.avatar_url ? (
-                          <img src={user.avatar_url} alt="" className="w-full h-full object-cover" />
-                        ) : (
-                          user.name.charAt(0)
-                        )}
+                      <div onClick={() => router.push(`/profile?userId=${user.id}`)} className="flex items-center gap-3 cursor-pointer">
+                        <div className="flex flex-col text-right">
+                          <span className="text-sm font-bold text-white">{user.name}</span>
+                          <span className="text-[10px] text-shasha-accent" dir="ltr">@{user.username}</span>
+                          
+                          {user.is_online ? (
+                            <span className="text-[9px] text-shasha-success font-medium flex items-center gap-1 mt-1 justify-end">
+                              متصل
+                              <span className="w-1.5 h-1.5 rounded-full bg-shasha-success" />
+                            </span>
+                          ) : (
+                            <span className="text-[9px] text-shasha-secondary mt-1 flex items-center gap-1 justify-end">
+                              غير متصل
+                              <span className="w-1.5 h-1.5 rounded-full bg-white/10" />
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="w-10 h-10 rounded-full bg-shasha-accent/25 flex items-center justify-center font-bold text-sm text-shasha-accent overflow-hidden">
+                          {user.avatar_url ? (
+                            <img src={user.avatar_url} alt="" className="w-full h-full object-cover" />
+                          ) : (
+                            user.name.charAt(0)
+                          )}
+                        </div>
                       </div>
                     </div>
-                  </div>
                 ))
               ) : searchQuery.trim() ? (
                 <div className="text-center text-xs text-shasha-secondary py-6">لا توجد نتائج بحث مطابقة</div>

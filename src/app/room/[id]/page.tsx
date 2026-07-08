@@ -33,6 +33,10 @@ import {
 import confetti from 'canvas-confetti';
 import { supabase } from '@/lib/supabase';
 import { useWebRTC, ParticipantPresence } from '@/hooks/useWebRTC';
+import { usePresence } from '@/contexts/PresenceContext';
+import YouTubePlayer from '@/components/YouTubePlayer';
+import CinemaPlayer from '@/components/CinemaPlayer';
+import type { CinemaRoomMetadata } from '@/types/cinema';
 
 interface Message {
   id: string;
@@ -120,10 +124,12 @@ export default function RoomPage() {
   const [roomName, setRoomName] = useState<string>('غرفة البث');
   const [isLoading, setIsLoading] = useState(true);
   const [roomExists, setRoomExists] = useState(false);
+  const [cinemaMetadata, setCinemaMetadata] = useState<CinemaRoomMetadata | null>(null);
 
   // UI States
   const [showChat, setShowChat] = useState(true);
   const [showParticipants, setShowParticipants] = useState(true);
+  const [showYouTube, setShowYouTube] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [copied, setCopied] = useState(false);
   const [inputText, setInputText] = useState('');
@@ -274,6 +280,7 @@ export default function RoomPage() {
       if (isMobile) {
         setShowChat(false);
         setShowParticipants(false);
+        setShowYouTube(false);
       }
     }
   }, []);
@@ -289,6 +296,46 @@ export default function RoomPage() {
     
     const checkRoom = async () => {
       try {
+        const { data: persistentRoom, error: persistentError } = await supabase
+          .from('persistent_rooms')
+          .select('name, room_type, tmdb_id, title, poster_path, backdrop_path, release_year, vote_average, runtime, stream_url')
+          .eq('id', roomId)
+          .single();
+
+        if (persistentRoom) {
+          console.log('[RoomPage] Loaded persistent_room data:', { id: roomId, name: persistentRoom.name, room_type: persistentRoom.room_type, stream_url: persistentRoom.stream_url, tmdb_id: persistentRoom.tmdb_id });
+          setRoomName(persistentRoom.name);
+          setRoomExists(true);
+          if (persistentRoom.room_type === 'cinema') {
+            console.log('[RoomPage] Setting cinemaMetadata with stream_url:', persistentRoom.stream_url);
+            setCinemaMetadata({
+              room_type: 'cinema',
+              tmdb_id: persistentRoom.tmdb_id,
+              title: persistentRoom.title || persistentRoom.name,
+              poster_path: persistentRoom.poster_path,
+              backdrop_path: persistentRoom.backdrop_path,
+              release_year: persistentRoom.release_year,
+              vote_average: persistentRoom.vote_average,
+              runtime: persistentRoom.runtime,
+              stream_url: persistentRoom.stream_url,
+            });
+            setShowYouTube(false);
+          } else {
+            setCinemaMetadata(null);
+          }
+
+          const { data: msgData } = await supabase
+            .from('messages')
+            .select('*')
+            .eq('room_id', roomId)
+            .order('created_at', { ascending: true });
+          
+          if (msgData) {
+            setMessages(msgData);
+          }
+          return;
+        }
+
         const { data, error } = await supabase
           .from('rooms')
           .select('name')
@@ -299,15 +346,22 @@ export default function RoomPage() {
           // If PGRST116 (row not found), it means table exists but room doesn't.
           // Otherwise, it's a table configuration error, in which case we fallback!
           if (error.code === 'PGRST116') {
-            setRoomExists(false);
+            if (persistentError?.code === 'PGRST116') {
+              setRoomExists(false);
+            } else {
+              console.warn('Persistent room check failed.', persistentError);
+              setRoomExists(false);
+            }
           } else {
             console.warn('Database room verification failed. Using fallback room.', error);
             setRoomName(`غرفة بث (مؤقتة)`);
             setRoomExists(true);
+            setCinemaMetadata(null);
           }
         } else if (data) {
           setRoomName(data.name);
           setRoomExists(true);
+          setCinemaMetadata(null);
           // Fetch existing messages
           const { data: msgData } = await supabase
             .from('messages')
@@ -325,6 +379,7 @@ export default function RoomPage() {
         console.warn('Room check error, using fallback:', err);
         setRoomName(`غرفة بث (مؤقتة)`);
         setRoomExists(true);
+        setCinemaMetadata(null);
       } finally {
         setIsLoading(false);
       }
@@ -564,6 +619,8 @@ export default function RoomPage() {
   };
 
   // Find who is sharing screen (including local or remote)
+  const isCinemaRoom = cinemaMetadata?.room_type === 'cinema';
+
   const activeScreenShareFeed = (() => {
     // Check remote peers first (do not always prioritize local user)
     const activeSharingPeer = webrtc.participants.find((p) => p.screenShareEnabled && p.id !== myId);
@@ -1032,9 +1089,12 @@ export default function RoomPage() {
                               {isSpeaking && (
                                 <span className="absolute inset-0 rounded-full border-2 border-shasha-accent animate-ping scale-110 opacity-70" />
                               )}
-                              <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${
-                                isMe ? 'bg-shasha-accent text-white' : 'bg-purple-500 text-white'
-                              }`}>
+                              <div
+                                onClick={() => !isMe && router.push(`/profile?userId=${p.id}`)}
+                                className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${
+                                  isMe ? 'bg-shasha-accent text-white' : 'bg-purple-500 text-white cursor-pointer hover:ring-2 hover:ring-purple-400/50'
+                                }`}
+                              >
                                 {p.name.substring(0, 2)}
                               </div>
                             </div>
@@ -1056,7 +1116,7 @@ export default function RoomPage() {
                                      'جاري التحقق...'}
                                   </span>
                                 </span>
-                                {p.name} {isMe && <span className="text-[10px] text-white/40 font-normal">(أنت)</span>}
+                                <span onClick={() => !isMe && router.push(`/profile?userId=${p.id}`)} className="cursor-pointer hover:text-shasha-accent transition-colors">{p.name}</span> {isMe && <span className="text-[10px] text-white/40 font-normal">(أنت)</span>}
                               </span>
                               <span className="text-[9px] text-shasha-secondary flex items-center gap-1">
                                 {p.isHost && <span className="px-1 py-0.5 rounded bg-shasha-warning/10 text-shasha-warning font-semibold text-[8px]">مضيف</span>}
@@ -1090,7 +1150,20 @@ export default function RoomPage() {
 
         {/* Center: Stream/Video Display Area */}
         <main className="flex-1 h-full bg-black/30 flex flex-col justify-center items-center p-4 relative overflow-hidden">
-          {activeScreenShareFeed ? (
+          {isCinemaRoom && cinemaMetadata ? (
+            <div className="w-full h-full flex flex-col items-center justify-center relative">
+              <CinemaPlayer
+                roomId={roomId}
+                myId={myId}
+                isHost={webrtc.isHost}
+                metadata={cinemaMetadata}
+              />
+            </div>
+          ) : showYouTube ? (
+            <div className="w-full h-full flex flex-col items-center justify-center relative">
+              <YouTubePlayer roomId={roomId} isHost={webrtc.isHost} />
+            </div>
+          ) : activeScreenShareFeed ? (
             <div className="w-full h-full flex flex-col items-center justify-center relative">
               <VideoPlayerStream
                 stream={activeScreenShareFeed.stream}
@@ -1282,6 +1355,7 @@ export default function RoomPage() {
                 ? 'bg-shasha-accent/15 border-shasha-accent/30 text-shasha-accent'
                 : 'bg-white/5 border-white/5 text-shasha-secondary hover:bg-white/10'
             }`}
+            title="الأعضاء"
           >
             <Users className="w-5 h-5" />
           </button>
@@ -1293,9 +1367,24 @@ export default function RoomPage() {
                 ? 'bg-shasha-accent/15 border-shasha-accent/30 text-shasha-accent'
                 : 'bg-white/5 border-white/5 text-shasha-secondary hover:bg-white/10'
             }`}
+            title="الدردشة"
           >
             <MessageSquare className="w-5 h-5" />
           </button>
+
+          {!isCinemaRoom && (
+            <button
+              onClick={() => setShowYouTube(!showYouTube)}
+              className={`w-10 h-10 rounded-full flex items-center justify-center border transition-all cursor-pointer ${
+                showYouTube
+                  ? 'bg-red-500/15 border-red-500/30 text-red-500'
+                  : 'bg-white/5 border-white/5 text-shasha-secondary hover:bg-white/10'
+              }`}
+              title="YouTube مشاهدة جماعية"
+            >
+              <Tv className="w-5 h-5" />
+            </button>
+          )}
         </div>
 
         {/* Center Side: Media Stream Toggles */}
@@ -1322,7 +1411,7 @@ export default function RoomPage() {
             {webrtc.camEnabled ? <Video className="w-5 h-5" /> : <VideoOff className="w-5 h-5" />}
           </button>
 
-          {webrtc.isHost && (
+          {webrtc.isHost && !isCinemaRoom && (
             <button
               onClick={webrtc.toggleScreenShare}
               title="مشاركة الشاشة"
@@ -1536,9 +1625,9 @@ export default function RoomPage() {
                           )}
                         </button>
 
-                        <div className="flex items-center gap-3">
+                        <div onClick={() => router.push(`/profile?userId=${friend.id}`)} className="flex items-center gap-3 cursor-pointer hover:bg-white/[0.02] p-1.5 rounded-xl transition-colors">
                           <div className="flex flex-col text-right">
-                            <span className="text-xs font-bold text-white">{friend.name}</span>
+                            <span className="text-xs font-bold text-white hover:text-shasha-accent transition-colors">{friend.name}</span>
                             <span className="text-[10px] text-shasha-secondary" dir="ltr">@{friend.username}</span>
                           </div>
                           <div className="w-9 h-9 rounded-full bg-purple-500/20 border border-purple-500/30 flex items-center justify-center font-bold text-xs text-purple-400 overflow-hidden shrink-0">

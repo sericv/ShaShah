@@ -4,6 +4,7 @@ import { useEffect, useState, useRef } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '@/lib/supabase';
+import { PresenceProvider } from '@/contexts/PresenceContext';
 import {
   Home,
   Monitor,
@@ -407,6 +408,7 @@ export default function PlatformLayout({
   ];
 
   return (
+    <PresenceProvider>
     <div className="min-h-screen bg-[#08080a] text-white flex select-none overflow-hidden h-screen max-h-screen">
       
       {/* Backdrop overlay for mobile */}
@@ -473,7 +475,7 @@ export default function PlatformLayout({
 
         {/* User profile card & Logout */}
         <div className="p-4 border-t border-white/[0.04] flex flex-col gap-2">
-          <div className="flex items-center justify-end gap-3 p-2.5 rounded-xl bg-white/3">
+          <div onClick={() => { setSidebarOpen(false); router.push('/profile'); }} className="flex items-center justify-end gap-3 p-2.5 rounded-xl bg-white/3 hover:bg-white/[0.06] transition-all cursor-pointer">
             <div className="flex flex-col text-right">
               <span className="text-xs font-bold text-white">{profile?.name}</span>
               <span className="text-[9px] text-shasha-secondary">نشط</span>
@@ -555,7 +557,7 @@ export default function PlatformLayout({
                             if (result.type === 'movie' || result.type === 'tv') {
                               router.push(`/explore?movieId=${result.id}`);
                             } else if (result.type === 'friend') {
-                              router.push(`/friends?friendId=${result.id}`);
+                              router.push(`/profile?userId=${result.id}`);
                             } else if (result.type === 'room') {
                               router.push(`/room/${result.room_id}`);
                             }
@@ -717,5 +719,6 @@ export default function PlatformLayout({
       </div>
 
     </div>
+    </PresenceProvider>
   );
 }

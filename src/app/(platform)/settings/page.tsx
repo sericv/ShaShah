@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { supabase } from '@/lib/supabase';
-import { Settings, User, Shield, Volume2, Globe, Trash2, Check, AlertCircle, CheckCircle2, Bell, Monitor, Smartphone, MessageSquare, PhoneCall, UserPlus } from 'lucide-react';
+import { Settings, User, Shield, Volume2, Globe, Trash2, Check, AlertCircle, CheckCircle2, Bell, Monitor, Smartphone, MessageSquare, PhoneCall, UserPlus, Eye, List, Star, Activity } from 'lucide-react';
 
 function getBrowserName(ua: string) {
   if (ua.includes('Edg/')) return 'Edge';
@@ -35,8 +35,13 @@ export default function SettingsPage() {
   const [avatarUrl, setAvatarUrl] = useState('');
   const [bio, setBio] = useState('');
   const [favoriteGenre, setFavoriteGenre] = useState('');
+  const [country, setCountry] = useState('');
   const [soundMuted, setSoundMuted] = useState(false);
   const [privacy, setPrivacy] = useState('public');
+  const [hideWatchHistory, setHideWatchHistory] = useState(false);
+  const [hideWatchlist, setHideWatchlist] = useState(false);
+  const [hideRatings, setHideRatings] = useState(false);
+  const [hideActivity, setHideActivity] = useState(false);
 
   // Push Notification Settings preferences
   const [notifyRoomInvites, setNotifyRoomInvites] = useState(true);
@@ -81,6 +86,7 @@ export default function SettingsPage() {
         setAvatarUrl(prof.avatar_url || '');
         setBio(prof.bio || '');
         setFavoriteGenre(prof.favorite_genre || 'خيال علمي / تشويق');
+        setCountry(prof.country || '');
       }
 
       // Settings details
@@ -98,6 +104,10 @@ export default function SettingsPage() {
         setNotifyMessages(sett.notify_messages !== false);
         setNotifyCalls(sett.notify_calls !== false);
         setNotifySystem(sett.notify_system !== false);
+        setHideWatchHistory(sett.hide_watch_history || false);
+        setHideWatchlist(sett.hide_watchlist || false);
+        setHideRatings(sett.hide_ratings || false);
+        setHideActivity(sett.hide_activity || false);
       }
 
       // Device & Browser status check
@@ -213,7 +223,8 @@ export default function SettingsPage() {
           username: username.trim().toLowerCase(),
           avatar_url: avatarUrl.trim(),
           bio: bio.trim(),
-          favorite_genre: favoriteGenre.trim()
+          favorite_genre: favoriteGenre.trim(),
+          country: country.trim()
         })
         .eq('id', profile.id);
 
@@ -231,7 +242,11 @@ export default function SettingsPage() {
         notify_friend_requests: notifyFriendRequests,
         notify_messages: notifyMessages,
         notify_calls: notifyCalls,
-        notify_system: notifySystem
+        notify_system: notifySystem,
+        hide_watch_history: hideWatchHistory,
+        hide_watchlist: hideWatchlist,
+        hide_ratings: hideRatings,
+        hide_activity: hideActivity
       };
 
       if (existingSettings) {
@@ -428,6 +443,18 @@ export default function SettingsPage() {
                 className="w-full px-4 py-3 rounded-xl glass-input text-right text-xs"
               />
             </div>
+            
+            {/* Country */}
+            <div>
+              <label className="block text-xs font-semibold text-shasha-secondary mb-2">الدولة</label>
+              <input
+                type="text"
+                value={country}
+                onChange={(e) => setCountry(e.target.value)}
+                placeholder="مثال: السعودية"
+                className="w-full px-4 py-3 rounded-xl glass-input text-right text-xs"
+              />
+            </div>
           </div>
 
           <div>
@@ -474,10 +501,43 @@ export default function SettingsPage() {
                 onChange={(e) => setPrivacy(e.target.value)}
                 className="w-full p-3 rounded-xl bg-white/5 border border-white/8 text-xs font-medium text-white focus:outline-none focus:border-shasha-accent text-right cursor-pointer"
               >
-                <option value="public" className="bg-shasha-card text-white">حساب عام (يمكن للجميع البحث عنك)</option>
+                <option value="public" className="bg-shasha-card text-white">حساب عام (يمكن للجميع مشاهدة ملفك)</option>
+                <option value="friends_only" className="bg-shasha-card text-white">الأصدقاء فقط</option>
                 <option value="private" className="bg-shasha-card text-white">حساب خاص (مخفي من البحث)</option>
               </select>
             </div>
+          </div>
+          
+          {/* Social Profile Privacy Toggles */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <button type="button" onClick={() => setHideWatchHistory(!hideWatchHistory)}
+              className={`p-3 rounded-xl border text-xs font-semibold flex items-center justify-between transition-all cursor-pointer ${
+                hideWatchHistory ? 'bg-shasha-danger/10 border-shasha-danger/25 text-shasha-danger' : 'bg-white/[0.02] border-white/5 text-white/70'
+              }`}>
+              <span>{hideWatchHistory ? 'سجل المشاهدة مخفي' : 'إظهار سجل المشاهدة'}</span>
+              <Eye className="w-4 h-4" />
+            </button>
+            <button type="button" onClick={() => setHideWatchlist(!hideWatchlist)}
+              className={`p-3 rounded-xl border text-xs font-semibold flex items-center justify-between transition-all cursor-pointer ${
+                hideWatchlist ? 'bg-shasha-danger/10 border-shasha-danger/25 text-shasha-danger' : 'bg-white/[0.02] border-white/5 text-white/70'
+              }`}>
+              <span>{hideWatchlist ? 'قائمة المشاهدة مخفية' : 'إظهار قائمة المشاهدة'}</span>
+              <List className="w-4 h-4" />
+            </button>
+            <button type="button" onClick={() => setHideRatings(!hideRatings)}
+              className={`p-3 rounded-xl border text-xs font-semibold flex items-center justify-between transition-all cursor-pointer ${
+                hideRatings ? 'bg-shasha-danger/10 border-shasha-danger/25 text-shasha-danger' : 'bg-white/[0.02] border-white/5 text-white/70'
+              }`}>
+              <span>{hideRatings ? 'التقييمات مخفية' : 'إظهار التقييمات'}</span>
+              <Star className="w-4 h-4" />
+            </button>
+            <button type="button" onClick={() => setHideActivity(!hideActivity)}
+              className={`p-3 rounded-xl border text-xs font-semibold flex items-center justify-between transition-all cursor-pointer ${
+                hideActivity ? 'bg-shasha-danger/10 border-shasha-danger/25 text-shasha-danger' : 'bg-white/[0.02] border-white/5 text-white/70'
+              }`}>
+              <span>{hideActivity ? 'النشاطات مخفية' : 'إظهار النشاطات'}</span>
+              <Activity className="w-4 h-4" />
+            </button>
           </div>
         </div>
 
